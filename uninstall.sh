@@ -60,7 +60,6 @@ rm -f \
   /etc/sysctl.d/99-openvpn-manager.conf
 rm -rf /opt/openvpn-web-manager
 systemctl daemon-reload
-sysctl --system >/dev/null 2>&1 || true
 
 if [[ "$PURGE" == "1" ]]; then
   rm -rf /etc/openvpn-manager /var/lib/openvpn-manager /etc/openvpn/server

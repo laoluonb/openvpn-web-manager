@@ -65,7 +65,32 @@ sudo ./install.sh --endpoint vpn.example.com
 --initial-client NAME    首个客户端名称，默认 admin
 --tls-cert PATH          已有 PEM 证书，需与 --tls-key 同时使用
 --tls-key PATH           已有 PEM 私钥，需与 --tls-cert 同时使用
+--existing-action MODE   已有 OpenVPN 的处理方式：preserve、remove 或 abort
 ```
+
+### 已有 OpenVPN 的处理
+
+安装器会在安装软件包前检测现有 OpenVPN：
+
+- **本项目的已有安装**：自动备份并保留 CA、客户端证书、控制台账号和配置，然后执行升级或修复。
+- **其他来源的 OpenVPN 配置**：交互安装时显示选择菜单；非交互安装默认先完整备份，再替换安装。
+- **只安装了软件包但尚未配置**：复用现有软件包并继续初始化。
+
+可在自动化环境中明确指定行为：
+
+```bash
+# 备份原配置后替换安装（推荐）
+sudo ./install.sh --existing-action preserve --endpoint vpn.example.com
+
+# 删除原配置和软件包后全新安装
+sudo ./install.sh --existing-action remove --endpoint vpn.example.com
+
+# 只检测；发现已有 OpenVPN 就退出
+sudo ./install.sh --existing-action abort --endpoint vpn.example.com
+```
+
+`preserve` 生成的完整归档位于 `/var/backups/openvpn-web-manager/时间戳/`。其中包含原
+OpenVPN 配置、PKI、状态目录和相关 systemd 自定义单元。`remove` 是破坏性操作，不会为原配置创建备份。
 
 仅允许指定办公网段访问控制台：
 
@@ -81,7 +106,8 @@ sudo ./install.sh \
 - 中文管理控制台地址；
 - 自动生成的控制台密码（仅首次安装或重置时显示）；
 - 首个 `.ovpn` 配置文件路径；
-- 仅 root 可读的凭据文件路径。
+- 仅 root 可读的凭据文件路径；
+- 检测到旧配置时生成的备份路径。
 
 ## 日常使用
 
@@ -148,6 +174,18 @@ make demo
 
 测试覆盖密码与会话算法、输入校验、Easy-RSA 索引解析、OpenVPN 状态解析、客户端配置渲染、
 JavaScript 语法和 Shell 语法。
+
+## 安装中断后的恢复
+
+如果旧版本停在 `sysctl` 的 conntrack 参数错误处，这些报错通常来自主机上其他
+`/etc/sysctl.d/` 配置，而不是 OpenVPN 配置本身。拉取最新版并使用与首次安装相同的参数重新执行即可：
+
+```bash
+git pull
+sudo ./install.sh --endpoint vpn.example.com
+```
+
+安装器可重复执行：已有 CA 和控制台密码会被保留，并在继续安装前创建备份。
 
 ## 安全边界
 

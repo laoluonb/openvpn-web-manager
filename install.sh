@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.0.0"
+VERSION="1.1.0"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 STATE_DIR="/var/lib/$APP_NAME"
@@ -24,6 +24,11 @@ PASSWORD_EXPLICIT="0"
 INITIAL_CLIENT="admin"
 TLS_CERT=""
 TLS_KEY=""
+EXISTING_ACTION="auto"
+EXISTING_BACKUP=""
+MANAGED_EXISTING="0"
+OPENVPN_CONFIG_PRESENT="0"
+OPENVPN_PACKAGE_PRESENT="0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -43,6 +48,8 @@ OpenVPN 管理中心安装器
   --initial-client NAME    首个客户端名称（默认：admin）
   --tls-cert PATH          已有 PEM 证书（必须同时指定 --tls-key）
   --tls-key PATH           已有 PEM 私钥（必须同时指定 --tls-cert）
+  --existing-action MODE   已有 OpenVPN 的处理方式：preserve、remove 或 abort
+                           默认：交互终端询问；非交互环境自动 preserve
   -h, --help               显示帮助
 EOF
 }
@@ -62,6 +69,7 @@ while (($#)); do
     --initial-client) INITIAL_CLIENT="${2:-}"; shift 2 ;;
     --tls-cert) TLS_CERT="${2:-}"; shift 2 ;;
     --tls-key) TLS_KEY="${2:-}"; shift 2 ;;
+    --existing-action) EXISTING_ACTION="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "未知选项：$1" ;;
   esac
@@ -81,12 +89,10 @@ fi
 [[ "$ADMIN_USER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] || die "管理员用户名无效。"
 [[ "$INITIAL_CLIENT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$ ]] || die "首个客户端名称无效。"
 [[ "$WEB_ALLOW" =~ ^[0-9./]+$ ]] || die "--web-allow 必须是 IPv4 CIDR。"
-python3 - "$WEB_ALLOW" <<'PY' || die "--web-allow 必须是有效的 IPv4 CIDR。"
-import ipaddress, sys
-network = ipaddress.ip_network(sys.argv[1], strict=False)
-if network.version != 4:
-    raise ValueError("必须使用 IPv4")
-PY
+case "$EXISTING_ACTION" in
+  auto|preserve|remove|abort) ;;
+  *) die "--existing-action 只能是 preserve、remove 或 abort。" ;;
+esac
 if [[ -n "$ENDPOINT" ]]; then
   [[ "$ENDPOINT" =~ ^[A-Za-z0-9.-]+$ ]] || die "公网地址必须是域名或 IPv4 地址。"
 fi
@@ -106,10 +112,162 @@ case "${ID:-}:${ID_LIKE:-}" in
 esac
 
 export DEBIAN_FRONTEND=noninteractive
+umask 077
+BACKUP_ROOT="/var/backups/$APP_NAME"
+BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
+
+stop_existing_openvpn_units() {
+  local units=()
+  mapfile -t units < <(
+    systemctl list-units --all --type=service --no-legend 'openvpn*' 2>/dev/null \
+      | awk '{print $1}' \
+      | sed '/^$/d'
+  )
+  if ((${#units[@]})); then
+    log "正在停止已有 OpenVPN 相关服务"
+    systemctl stop "${units[@]}" 2>/dev/null || true
+  fi
+}
+
+backup_existing_openvpn() {
+  local archive_paths=()
+  local relative
+  for relative in \
+    etc/openvpn \
+    etc/openvpn-manager \
+    var/lib/openvpn \
+    var/lib/openvpn-manager \
+    var/log/openvpn; do
+    [[ -e "/$relative" ]] && archive_paths+=("$relative")
+  done
+  while IFS= read -r relative; do
+    relative="${relative#/}"
+    [[ -n "$relative" ]] && archive_paths+=("$relative")
+  done < <(
+    find /etc/systemd/system -maxdepth 2 \
+      \( -name 'openvpn*.service' -o -name 'openvpn*.service.d' \) \
+      -print 2>/dev/null
+  )
+
+  install -d -m 0700 "$BACKUP_DIR"
+  if ((${#archive_paths[@]})); then
+    tar -C / -czf "$BACKUP_DIR/openvpn-existing.tar.gz" "${archive_paths[@]}"
+  fi
+  dpkg-query -W -f='${binary:Package}\t${Version}\n' 'openvpn*' 'easy-rsa' \
+    >"$BACKUP_DIR/packages.txt" 2>/dev/null || true
+  cat >"$BACKUP_DIR/README.txt" <<EOF
+OpenVPN 安装前备份
+创建时间：$(date -u +%Y-%m-%dT%H:%M:%SZ)
+处理方式：保留原配置后安装 OpenVPN 管理中心
+归档文件：openvpn-existing.tar.gz
+EOF
+  EXISTING_BACKUP="$BACKUP_DIR"
+  log "已有 OpenVPN 配置已备份到 $BACKUP_DIR"
+}
+
+remove_existing_openvpn_state() {
+  local custom_units=()
+  mapfile -t custom_units < <(
+    find /etc/systemd/system -maxdepth 2 \
+      \( -name 'openvpn*.service' -o -name 'openvpn*.service.d' \) \
+      -print 2>/dev/null
+  )
+  if ((${#custom_units[@]})); then
+    rm -rf -- "${custom_units[@]}"
+  fi
+  rm -rf /etc/openvpn /var/lib/openvpn /var/log/openvpn
+  if [[ "$MANAGED_EXISTING" == "1" ]]; then
+    rm -rf "$CONFIG_DIR" "$STATE_DIR"
+    if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
+      rm -rf "$INSTALL_DIR"
+    fi
+    rm -f \
+      /etc/systemd/system/openvpn-web-manager.service \
+      /etc/systemd/system/openvpn-manager-agent.service \
+      /etc/systemd/system/openvpn-manager-firewall.service \
+      /usr/local/sbin/openvpn-manager-firewall \
+      /usr/local/bin/openvpn-managerctl \
+      /etc/nginx/sites-enabled/openvpn-web-manager \
+      /etc/nginx/sites-available/openvpn-web-manager \
+      /root/openvpn-manager-credentials.txt
+  fi
+  systemctl daemon-reload
+}
+
+if dpkg-query -W -f='${Status}' openvpn 2>/dev/null | grep -q 'install ok installed'; then
+  OPENVPN_PACKAGE_PRESENT="1"
+fi
+if [[ -n "$(find /etc/openvpn -type f \
+  \( -name '*.conf' -o -name '*.ovpn' -o -name '*.key' -o -name 'ca.crt' -o -name 'index.txt' \) \
+  -print -quit 2>/dev/null)" ]]; then
+  OPENVPN_CONFIG_PRESENT="1"
+fi
+if [[ -s "$CONFIG_DIR/server.json" || -s "$CONFIG_DIR/install-state.json" ]]; then
+  MANAGED_EXISTING="1"
+fi
+
+if [[ "$OPENVPN_CONFIG_PRESENT" == "1" || "$MANAGED_EXISTING" == "1" ]]; then
+  if [[ "$EXISTING_ACTION" == "auto" ]]; then
+    if [[ "$MANAGED_EXISTING" == "1" ]]; then
+      EXISTING_ACTION="preserve"
+      log "检测到本项目已有安装，将保留 CA、客户端和控制台配置并执行升级/修复"
+    elif [[ -t 0 && -t 1 ]]; then
+      printf '\n检测到已有且并非本项目创建的 OpenVPN 配置。\n'
+      printf '  1) 备份原配置后替换安装（推荐）\n'
+      printf '  2) 删除原配置后全新安装（不可恢复）\n'
+      printf '  3) 退出，不做修改\n'
+      read -r -p '请选择 [1-3]：' existing_choice
+      case "$existing_choice" in
+        1) EXISTING_ACTION="preserve" ;;
+        2) EXISTING_ACTION="remove" ;;
+        *) EXISTING_ACTION="abort" ;;
+      esac
+    else
+      EXISTING_ACTION="preserve"
+      warn "非交互环境检测到已有 OpenVPN 配置，将自动备份后替换安装。"
+    fi
+  fi
+
+  case "$EXISTING_ACTION" in
+    preserve)
+      stop_existing_openvpn_units
+      backup_existing_openvpn
+      if [[ "$MANAGED_EXISTING" != "1" ]]; then
+        remove_existing_openvpn_state
+      fi
+      ;;
+    remove)
+      warn "将删除已有 OpenVPN 配置并执行全新安装。"
+      stop_existing_openvpn_units
+      apt-get purge -y openvpn easy-rsa 2>/dev/null || true
+      remove_existing_openvpn_state
+      ;;
+    abort)
+      die "已取消安装，现有 OpenVPN 未被修改。"
+      ;;
+  esac
+elif [[ "$OPENVPN_PACKAGE_PRESENT" == "1" ]]; then
+  case "$EXISTING_ACTION" in
+    abort) die "检测到已安装 OpenVPN 软件包，已按要求取消。" ;;
+    remove)
+      log "检测到 OpenVPN 软件包但没有有效配置，将重新安装软件包"
+      apt-get purge -y openvpn easy-rsa 2>/dev/null || true
+      ;;
+    *) log "检测到已安装但尚未配置的 OpenVPN，将复用软件包并继续初始化" ;;
+  esac
+fi
+
 log "正在安装系统软件包"
 apt-get update -y
 apt-get install -y --no-install-recommends \
   openvpn easy-rsa python3 nginx openssl iptables iproute2 ca-certificates curl
+
+python3 - "$WEB_ALLOW" <<'PY' || die "--web-allow 必须是有效的 IPv4 CIDR。"
+import ipaddress, sys
+network = ipaddress.ip_network(sys.argv[1], strict=False)
+if network.version != 4:
+    raise ValueError("必须使用 IPv4")
+PY
 
 if [[ -z "$ENDPOINT" ]]; then
   ENDPOINT="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
@@ -125,19 +283,6 @@ PUBLIC_INTERFACE="$(ip -4 route show default | awk '/default/ {print $5; exit}')
 
 if [[ "$PASSWORD_EXPLICIT" == "1" && ${#ADMIN_PASSWORD} -lt 12 ]]; then
   die "控制台密码至少需要 12 个字符。"
-fi
-
-umask 077
-BACKUP_ROOT="/var/backups/$APP_NAME"
-BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)"
-if [[ -e "$CONFIG_DIR" || -e "$OPENVPN_DIR/server.conf" ]]; then
-  log "正在备份现有配置到 $BACKUP_DIR"
-  install -d -m 0700 "$BACKUP_DIR"
-  [[ -d "$CONFIG_DIR" ]] && cp -a "$CONFIG_DIR" "$BACKUP_DIR/manager-config"
-  [[ -f "$OPENVPN_DIR/server.conf" ]] && cp -a "$OPENVPN_DIR/server.conf" "$BACKUP_DIR/server.conf"
-  if [[ -d "$EASYRSA_DIR/pki" ]]; then
-    tar -C "$EASYRSA_DIR" -czf "$BACKUP_DIR/pki.tar.gz" pki
-  fi
 fi
 
 log "正在安装应用文件"
@@ -270,6 +415,9 @@ fi
 chown root:"$WEB_GROUP" "$CONFIG_DIR/web.json"
 chmod 0640 "$CONFIG_DIR/web.json"
 
+if systemctl is-active --quiet openvpn-manager-firewall.service 2>/dev/null; then
+  systemctl stop openvpn-manager-firewall.service || true
+fi
 cat >"$CONFIG_DIR/firewall.env" <<EOF
 PUBLIC_INTERFACE=$(printf '%q' "$PUBLIC_INTERFACE")
 VPN_SUBNET=$(printf '%q' "$VPN_SUBNET")
@@ -283,7 +431,9 @@ chmod 0600 "$CONFIG_DIR/firewall.env"
 cat >/etc/sysctl.d/99-openvpn-manager.conf <<'EOF'
 net.ipv4.ip_forward = 1
 EOF
-sysctl --system >/dev/null
+if ! sysctl -q -p /etc/sysctl.d/99-openvpn-manager.conf; then
+  die "无法启用 IPv4 转发。请确认当前 VPS/容器允许修改 net.ipv4.ip_forward。"
+fi
 
 log "正在配置 HTTPS"
 if [[ -n "$TLS_CERT" ]]; then
@@ -321,22 +471,37 @@ install -m 0644 "$SCRIPT_DIR/config/openvpn-service-override.conf" \
   /etc/systemd/system/openvpn-server@server.service.d/openvpn-manager.conf
 
 systemctl daemon-reload
-systemctl enable --now openvpn-manager-firewall.service
-systemctl enable --now openvpn-server@server.service
+systemctl enable openvpn-manager-firewall.service
+systemctl restart openvpn-manager-firewall.service
+systemctl enable openvpn-server@server.service
+systemctl restart openvpn-server@server.service
 
 log "正在创建首个客户端配置"
 python3 "$INSTALL_DIR/backend/agent.py" --direct create_client --name "$INITIAL_CLIENT" || \
   warn "首个客户端配置已存在或无法重新创建，请检查上方代理输出。"
 
-systemctl enable --now openvpn-manager-agent.service
-systemctl enable --now openvpn-web-manager.service
-systemctl enable --now nginx.service
-systemctl restart nginx.service openvpn-web-manager.service
+systemctl enable openvpn-manager-agent.service openvpn-web-manager.service nginx.service
+systemctl restart openvpn-manager-agent.service openvpn-web-manager.service nginx.service
 
 sleep 1
 systemctl is-active --quiet openvpn-server@server.service || die "OpenVPN 启动失败，请运行 journalctl -u openvpn-server@server 查看日志。"
 systemctl is-active --quiet openvpn-manager-agent.service || die "管理代理启动失败。"
 systemctl is-active --quiet openvpn-web-manager.service || die "管理 Web 服务启动失败。"
+
+python3 - "$CONFIG_DIR/install-state.json" "$VERSION" "$EXISTING_ACTION" "$EXISTING_BACKUP" <<'PY'
+import datetime, json, pathlib, sys
+path, version, existing_action, backup = sys.argv[1:]
+data = {
+    "managed_by": "openvpn-web-manager",
+    "version": version,
+    "installed_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "existing_action": existing_action,
+    "existing_backup": backup or None,
+}
+pathlib.Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+chown root:"$WEB_GROUP" "$CONFIG_DIR/install-state.json"
+chmod 0640 "$CONFIG_DIR/install-state.json"
 
 CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
@@ -361,6 +526,9 @@ if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
   printf '  凭据文件：       %s\n' "$CREDENTIAL_FILE"
 else
   printf '  凭据文件：       未变更（已保留现有 web.json）\n'
+fi
+if [[ -n "$EXISTING_BACKUP" ]]; then
+  printf '  原配置备份：     %s\n' "$EXISTING_BACKUP"
 fi
 printf '\n'
 if [[ "$WEB_ALLOW" == "0.0.0.0/0" ]]; then
