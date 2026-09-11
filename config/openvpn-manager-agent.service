@@ -1,8 +1,7 @@
 [Unit]
 Description=OpenVPN Web Manager privileged agent
 After=network-online.target openvpn-server@server.service
-Wants=network-online.target
-Requires=openvpn-server@server.service
+Wants=network-online.target openvpn-server@server.service
 
 [Service]
 Type=simple

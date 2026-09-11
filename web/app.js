@@ -305,8 +305,16 @@ function renderClientTable(clients) {
     row.querySelector(".state-cell .cell-subtle").textContent = stateDetail;
     const route = row.querySelector(".route-badge");
     route.querySelector("strong").textContent = client.lan_subnet || "未配置";
-    route.querySelector("span").textContent = client.lan_subnet ? (client.share_lan ? "其他客户端可访问" : "仅服务端可访问") : "普通终端";
-    route.querySelector("span").classList.toggle("shared", Boolean(client.lan_subnet && client.share_lan));
+    const routeState = route.querySelector("span");
+    routeState.textContent = !client.lan_subnet
+      ? "普通终端"
+      : !client.online
+        ? "客户端离线，内网不可达"
+        : client.share_lan
+          ? "其他客户端可访问"
+          : "仅服务端可访问";
+    routeState.classList.toggle("shared", Boolean(client.lan_subnet && client.online && client.share_lan));
+    routeState.classList.toggle("unavailable", Boolean(client.lan_subnet && !client.online));
     row.querySelector(".vpn-address").textContent = connection.virtual_address || "—";
     row.querySelector(".real-address").textContent = connection.real_address || "没有活动隧道";
     row.querySelector(".received").textContent = `↓ ${formatBytes(connection.bytes_received)}`;
@@ -664,13 +672,13 @@ async function loadUpdateStatus(quiet = false) {
 function confirmUpdate() {
   showConfirm({
     title: "更新管理面板与 OpenVPN？",
-    message: "系统将从 GitHub 最新稳定版本下载安装包，备份现有配置，通过软件源升级 OpenVPN，并重新随机 VPN 端口。更新后请放行新端口并重新下载客户端配置；页面可能短暂断开，请勿重复点击。",
+    message: "系统将从 GitHub 最新稳定版本下载安装包，备份现有配置，并通过软件源升级 OpenVPN。现有 VPN 端口和服务端参数不会改变；页面可能短暂断开，请勿重复点击。",
     label: "开始更新",
     danger: false,
     action: async () => {
       const result = await api("/api/update", { method: "POST" });
       renderUpdateStatus(result);
-      toast("更新任务已启动", "本次更新会重新随机 VPN 端口；完成后请放行新端口并重新下载客户端配置。" );
+      toast("更新任务已启动", "本次更新只升级软件并保留现有 VPN 端口和服务端参数。" );
       switchView("system");
     },
   });

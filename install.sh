@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.0"
+VERSION="1.2.1"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -37,6 +37,7 @@ MANAGED_EXISTING="0"
 OPENVPN_CONFIG_PRESENT="0"
 OPENVPN_PACKAGE_PRESENT="0"
 ENDPOINT_EXPLICIT="0"
+VPN_PORT_EXPLICIT="0"
 VPN_PROTOCOL_EXPLICIT="0"
 VPN_SUBNET_EXPLICIT="0"
 DNS_SERVERS_EXPLICIT="0"
@@ -55,7 +56,7 @@ OpenVPN 管理中心安装器
 
 选项：
   --endpoint HOST          公网 IPv4 地址或域名
-  --vpn-port PORT          OpenVPN 服务端口（每次安装默认随机 10000-29999；可指定固定端口）
+  --vpn-port PORT          OpenVPN 服务端口（全新安装默认随机 10000-29999；可传 random）
   --vpn-protocol PROTO     OpenVPN 协议：udp 或 tcp（默认：udp）
   --vpn-subnet CIDR        VPN 私有子网（默认：10.8.0.0/24）
   --dns-servers LIST       推送的 DNS，逗号分隔（默认：1.1.1.1,9.9.9.9）
@@ -81,7 +82,7 @@ die() { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 while (($#)); do
   case "$1" in
     --endpoint) ENDPOINT="${2:-}"; ENDPOINT_EXPLICIT="1"; shift 2 ;;
-    --vpn-port) VPN_PORT="${2:-}"; shift 2 ;;
+    --vpn-port) VPN_PORT="${2:-}"; VPN_PORT_EXPLICIT="1"; shift 2 ;;
     --vpn-protocol) VPN_PROTOCOL="${2:-}"; VPN_PROTOCOL_EXPLICIT="1"; shift 2 ;;
     --vpn-subnet) VPN_SUBNET="${2:-}"; VPN_SUBNET_EXPLICIT="1"; shift 2 ;;
     --dns-servers) DNS_SERVERS="${2:-}"; DNS_SERVERS_EXPLICIT="1"; shift 2 ;;
@@ -361,6 +362,16 @@ load_preserved_server_settings() {
   local source=""
   local values=()
   [[ "$MANAGED_EXISTING" == "1" && "$EXISTING_ACTION" == "preserve" ]] || return 0
+
+  # v1.2.0 的在线更新器会错误地显式传入 --vpn-port random。更新进程由
+  # systemd 启动且已经写入更新请求文件时，忽略这个旧参数，确保升级到
+  # v1.2.1 的过程中也不会意外改变现有客户端使用的端口。
+  if [[ "$VPN_PORT_EXPLICIT" == "1" && "${VPN_PORT,,}" == "random" \
+    && -n "${INVOCATION_ID:-}" && -s "$STATE_DIR/update-request.json" ]]; then
+    VPN_PORT_EXPLICIT="0"
+    warn "检测到旧版在线更新调用，将保留当前 VPN 端口而不是重新随机。"
+  fi
+
   if [[ -s "$CONFIG_DIR/server.json" ]]; then
     source="$CONFIG_DIR/server.json"
   elif [[ -s "$LEGACY_CONFIG_DIR/server.json" ]]; then
@@ -389,6 +400,7 @@ PY
   OLD_VPN_SUBNET="${values[3]}"
   OLD_VPN_PORT="${values[1]}"
   [[ "$ENDPOINT_EXPLICIT" == "1" ]] || ENDPOINT="${values[0]}"
+  [[ "$VPN_PORT_EXPLICIT" == "1" ]] || VPN_PORT="${values[1]}"
   [[ "$VPN_PROTOCOL_EXPLICIT" == "1" ]] || VPN_PROTOCOL="${values[2]}"
   [[ "$VPN_SUBNET_EXPLICIT" == "1" ]] || VPN_SUBNET="${values[3]}"
   [[ "$DNS_SERVERS_EXPLICIT" == "1" ]] || DNS_SERVERS="${values[4]}"
@@ -396,7 +408,7 @@ PY
   [[ "$MAX_CLIENTS_EXPLICIT" == "1" ]] || MAX_CLIENTS="${values[6]}"
   [[ "$WEB_PORT_EXPLICIT" == "1" ]] || WEB_PORT="${values[7]}"
   [[ "$WEB_ALLOW_EXPLICIT" == "1" ]] || WEB_ALLOW="${values[8]}"
-  log "已载入并保留现有服务端参数；VPN 端口将在本次安装中重新随机，命令行显式参数仍具有最高优先级"
+  log "已载入并保留现有服务端参数，包括当前 VPN 端口；命令行显式参数仍具有最高优先级"
 }
 
 generate_random_vpn_port() {
@@ -506,7 +518,8 @@ find "$INSTALL_DIR" -type f -exec chmod 0644 {} +
 
 install -d -m 0750 -o root -g "$WEB_GROUP" "$CONFIG_DIR" "$CONFIG_DIR/tls"
 install -d -m 0750 -o root -g "$WEB_GROUP" "$STATE_DIR" "$STATE_DIR/clients"
-install -d -m 0750 "$OPENVPN_DIR" "$OPENVPN_DIR/ccd" "$EASYRSA_DIR"
+install -d -m 0750 "$OPENVPN_DIR" "$EASYRSA_DIR"
+install -d -m 0750 -o root -g nogroup "$OPENVPN_DIR/ccd"
 install -d -m 0770 -o root -g nogroup /var/log/openvpn /var/lib/openvpn/server
 
 if [[ ! -f "$EASYRSA_DIR/easyrsa" ]]; then

@@ -318,6 +318,7 @@ td { height: 67px; padding: 8px 15px; border-top: 1px solid var(--line); font-si
 .route-badge strong { font-size: 10px; }
 .route-badge span { width: fit-content; color: var(--muted-2); font-size: 9px; }
 .route-badge span.shared { color: var(--success); }
+.route-badge span.unavailable { color: var(--danger); }
 
 .update-copy { margin: 19px 0; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .update-versions { margin: 0 0 18px; }

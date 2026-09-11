@@ -35,6 +35,19 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('r"/api/clients/([^/]+)/disconnect"', server)
         self.assertIn('r"/api/clients/([^/]+)/network"', server)
 
+    def test_online_update_copy_promises_to_preserve_vpn_port(self) -> None:
+        html = (ROOT / "web/index.html").read_text(encoding="utf-8")
+        javascript = (ROOT / "web/app.js").read_text(encoding="utf-8")
+        self.assertIn("保留现有 VPN 端口和服务端参数", html)
+        self.assertIn("现有 VPN 端口和服务端参数不会改变", javascript)
+        self.assertNotIn("并重新随机 VPN 端口", javascript)
+
+    def test_offline_branch_is_marked_unreachable(self) -> None:
+        html = (ROOT / "web/index.html").read_text(encoding="utf-8")
+        javascript = (ROOT / "web/app.js").read_text(encoding="utf-8")
+        self.assertIn("客户端离线，内网不可达", javascript)
+        self.assertIn("允许 OpenVPN 隧道转发到 LAN", html)
+
 
 if __name__ == "__main__":
     unittest.main()

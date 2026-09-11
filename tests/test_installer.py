@@ -100,19 +100,21 @@ class InstallerRegressionTests(unittest.TestCase):
         installer = (ROOT / "install.sh").read_text(encoding="utf-8")
         override = (ROOT / "config/openvpn-service-override.conf").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.0"', installer)
+        self.assertIn('VERSION="1.2.1"', installer)
         self.assertIn('agent.py" --direct sync_runtime', installer)
         self.assertIn("openvpn-manager-update.service", installer)
         self.assertIn("RuntimeDirectory=openvpn-manager", override)
         self.assertIn("RuntimeDirectoryPreserve=yes", override)
         self.assertIn("api.github.com/repos/$REPOSITORY/releases/latest", updater)
         self.assertIn("--existing-action preserve", updater)
-        self.assertIn("--vpn-port random", updater)
+        self.assertIn('data.get("vpn_port", 1194)', updater)
+        self.assertIn('--vpn-port "${SETTINGS[1]}"', updater)
+        self.assertNotIn("--vpn-port random", updater)
         self.assertIn("--vpn-protocol", updater)
         self.assertIn("--vpn-subnet", updater)
         self.assertIn("更新包包含不允许的特殊文件", updater)
 
-    def test_managed_upgrade_preserves_unset_server_parameters_and_rerandomizes_port(self) -> None:
+    def test_managed_upgrade_preserves_unset_server_parameters_and_port(self) -> None:
         installer = (ROOT / "install.sh").read_text(encoding="utf-8")
         self.assertIn("load_preserved_server_settings", installer)
         self.assertIn('VPN_PORT="random"', installer)
@@ -120,8 +122,11 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertIn("10000 + secrets.randbelow(20000)", installer)
         self.assertIn('OLD_VPN_PORT="${values[1]}"', installer)
         self.assertIn("port == web_port or port == previous_port", installer)
-        self.assertNotIn('[[ "$VPN_PORT_EXPLICIT" == "1" ]] || VPN_PORT="${values[1]}"', installer)
-        self.assertNotIn('VPN_PORT_EXPLICIT="0"', installer)
+        self.assertIn('[[ "$VPN_PORT_EXPLICIT" == "1" ]] || VPN_PORT="${values[1]}"', installer)
+        self.assertIn('VPN_PORT_EXPLICIT="0"', installer)
+        self.assertIn('-n "${INVOCATION_ID:-}"', installer)
+        self.assertIn('"$STATE_DIR/update-request.json"', installer)
+        self.assertIn("检测到旧版在线更新调用", installer)
         self.assertIn('[[ "$VPN_SUBNET_EXPLICIT" == "1" ]] || VPN_SUBNET=', installer)
         self.assertIn('[[ "$WEB_PORT_EXPLICIT" == "1" ]] || WEB_PORT=', installer)
         self.assertIn('OLD_VPN_SUBNET="${values[3]}"', installer)
@@ -137,6 +142,13 @@ class InstallerRegressionTests(unittest.TestCase):
         service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         self.assertIn("/var/lib/openvpn/server", service)
 
+    def test_ccd_is_readable_after_openvpn_drops_privileges(self) -> None:
+        installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+        agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
+        self.assertIn('install -d -m 0750 -o root -g nogroup "$OPENVPN_DIR/ccd"', installer)
+        self.assertIn('os.chown(ccd_dir, 0, group_gid("nogroup"))', agent)
+        self.assertIn('mode=0o640, group_name="nogroup"', agent)
+
     def test_firewall_uses_dedicated_chains_for_client_lan_policy(self) -> None:
         firewall = (ROOT / "scripts/openvpn-manager-firewall").read_text(encoding="utf-8")
         self.assertIn('FORWARD_CHAIN="OVPNMGR_FORWARD"', firewall)
@@ -151,6 +163,11 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertIn('/^openvpn-server@.*\\.service$/', installer)
         stop_function = installer[installer.index("stop_existing_openvpn_units()") : installer.index("backup_existing_openvpn()")]
         self.assertNotIn("openvpn-manager-update.service", stop_function)
+
+    def test_agent_stays_running_when_openvpn_is_restarted(self) -> None:
+        service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
+        self.assertIn("Wants=network-online.target openvpn-server@server.service", service)
+        self.assertNotIn("Requires=openvpn-server@server.service", service)
 
 
 if __name__ == "__main__":

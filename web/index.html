@@ -225,7 +225,7 @@
           </article>
           <article class="panel-card update-card">
             <div class="panel-heading"><div><p class="eyebrow">在线维护</p><h3>一键更新</h3></div><div class="metric-icon metric-cyan"><svg><use href="#i-cloud"></use></svg></div></div>
-            <p class="update-copy">从本项目 GitHub 最新稳定版本更新整个管理面板，同时通过系统软件源升级 OpenVPN。执行前会自动备份现有配置，并为 OpenVPN 重新随机端口。</p>
+            <p class="update-copy">从本项目 GitHub 最新稳定版本更新整个管理面板，同时通过系统软件源升级 OpenVPN。执行前会自动备份，并保留现有 VPN 端口和服务端参数。</p>
             <dl class="update-versions">
               <div><dt>管理面板</dt><dd id="managerVersion">—</dd></div>
               <div><dt>OpenVPN</dt><dd id="updateOpenvpnVersion">—</dd></div>
@@ -294,10 +294,11 @@
       <button class="modal-close" data-close-dialog="networkDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
       <p class="eyebrow">站点互联</p>
       <h2 id="networkDialogTitle">配置客户端内网</h2>
-      <p>填写该客户端后方的 LAN 网段。保存会更新服务端路由、防火墙并短暂重启 OpenVPN。</p>
+      <p>填写该客户端后方的 LAN 网段。保存会更新服务端路由、防火墙并短暂重启 OpenVPN。下级路由器必须在线，并在本机放行 VPN 到 LAN 的转发。</p>
       <input id="networkClientName" type="hidden">
       <label><span>客户端下级内网</span><input id="networkLanSubnet" placeholder="例如 192.168.50.0/24" autocomplete="off"><small>留空并保存可移除现有下级内网配置。</small></label>
       <label id="networkShareField" class="switch-field compact"><input id="networkShareLan" type="checkbox"><span class="switch-control"></span><span><strong>允许其他 VPN 客户端访问</strong><small>开启后只向其他客户端推送路由，并放行访问与响应流量；不会把该路由推回当前客户端。</small></span></label>
+      <div class="settings-warning"><svg><use href="#i-activity"></use></svg><span>服务端无法代替 OpenWrt、爱快等下级路由器的本机防火墙；请确保其允许 OpenVPN 隧道转发到 LAN，且 LAN 主机通过该路由器返回流量。</span></div>
       <p id="networkFormError" class="form-error" role="alert"></p>
       <div class="modal-actions"><button class="button button-ghost" data-close-dialog="networkDialog" type="button">取消</button><button id="saveNetworkButton" class="button button-primary" type="submit"><svg><use href="#i-save"></use></svg><span>保存路由</span></button></div>
     </form>

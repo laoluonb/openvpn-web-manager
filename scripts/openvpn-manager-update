@@ -164,6 +164,7 @@ import json, pathlib, sys
 data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 values = [
     data["endpoint"],
+    data.get("vpn_port", 1194),
     data.get("vpn_protocol", "udp"),
     data.get("web_port", 8443),
     data.get("web_allow", "0.0.0.0/0"),
@@ -181,14 +182,14 @@ write_status "running" "正在备份配置、升级 OpenVPN 并安装管理面�
 bash "$SOURCE_DIR/install.sh" \
   --existing-action preserve \
   --endpoint "${SETTINGS[0]}" \
-  --vpn-port random \
-  --vpn-protocol "${SETTINGS[1]}" \
-  --web-port "${SETTINGS[2]}" \
-  --web-allow "${SETTINGS[3]}" \
-  --vpn-subnet "${SETTINGS[4]}" \
-  --dns-servers "${SETTINGS[5]}" \
-  --redirect-gateway "${SETTINGS[6]}" \
-  --max-clients "${SETTINGS[7]}"
+  --vpn-port "${SETTINGS[1]}" \
+  --vpn-protocol "${SETTINGS[2]}" \
+  --web-port "${SETTINGS[3]}" \
+  --web-allow "${SETTINGS[4]}" \
+  --vpn-subnet "${SETTINGS[5]}" \
+  --dns-servers "${SETTINGS[6]}" \
+  --redirect-gateway "${SETTINGS[7]}" \
+  --max-clients "${SETTINGS[8]}"
 
 UPDATE_FINISHED="1"
-write_status "completed" "管理面板与 OpenVPN 已更新完成，OpenVPN 端口已重新随机；请放行新端口并重新下载客户端配置。" "$TARGET_VERSION"
+write_status "completed" "管理面板与 OpenVPN 已更新完成，现有 VPN 端口和服务端参数保持不变。" "$TARGET_VERSION"

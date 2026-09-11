@@ -740,6 +740,11 @@ class OpenVPNController:
     ) -> None:
         ccd_dir = self.openvpn_dir / "ccd"
         ccd_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+        # OpenVPN reads CCD files when a client connects, after dropping to
+        # nobody:nogroup.  Keep the directory private from other users while
+        # allowing the runtime group to traverse it and read each client file.
+        os.chown(ccd_dir, 0, group_gid("nogroup"))
+        os.chmod(ccd_dir, 0o750)
         marker = "# Managed by openvpn-web-manager"
         rendered = render_ccd_configs(networks, active_clients)
         expected = set(rendered)
@@ -753,7 +758,7 @@ class OpenVPNController:
             if first_line == marker:
                 candidate.unlink()
         for name, content in rendered.items():
-            self._atomic_text(ccd_dir / name, content, mode=0o600)
+            self._atomic_text(ccd_dir / name, content, mode=0o640, group_name="nogroup")
 
     def _write_firewall_files(self, networks: dict[str, dict[str, Any]]) -> None:
         values = {
