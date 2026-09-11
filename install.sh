@@ -71,8 +71,12 @@ done
 [[ -f "$SCRIPT_DIR/backend/agent.py" && -f "$SCRIPT_DIR/web/index.html" ]] || \
   die "请在完整的项目目录中运行 install.sh。"
 [[ -d /run/systemd/system ]] || die "系统必须使用 systemd。"
-[[ "$VPN_PORT" =~ ^[0-9]+$ ]] && ((VPN_PORT >= 1 && VPN_PORT <= 65535)) || die "VPN 端口无效。"
-[[ "$WEB_PORT" =~ ^[0-9]+$ ]] && ((WEB_PORT >= 1 && WEB_PORT <= 65535)) || die "管理端口无效。"
+if [[ ! "$VPN_PORT" =~ ^[0-9]+$ ]] || ((VPN_PORT < 1 || VPN_PORT > 65535)); then
+  die "VPN 端口无效。"
+fi
+if [[ ! "$WEB_PORT" =~ ^[0-9]+$ ]] || ((WEB_PORT < 1 || WEB_PORT > 65535)); then
+  die "管理端口无效。"
+fi
 [[ "$VPN_PORT" != "$WEB_PORT" ]] || die "VPN 端口和管理端口不能相同。"
 [[ "$ADMIN_USER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] || die "管理员用户名无效。"
 [[ "$INITIAL_CLIENT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$ ]] || die "首个客户端名称无效。"

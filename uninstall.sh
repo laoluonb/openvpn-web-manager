@@ -46,7 +46,9 @@ systemctl disable --now openvpn-manager-firewall.service 2>/dev/null || true
 /usr/local/sbin/openvpn-manager-firewall stop 2>/dev/null || true
 
 rm -f /etc/nginx/sites-enabled/openvpn-web-manager /etc/nginx/sites-available/openvpn-web-manager
-nginx -t >/dev/null 2>&1 && systemctl reload nginx.service || true
+if nginx -t >/dev/null 2>&1; then
+  systemctl reload nginx.service || true
+fi
 
 rm -f \
   /etc/systemd/system/openvpn-web-manager.service \
@@ -63,8 +65,12 @@ sysctl --system >/dev/null 2>&1 || true
 if [[ "$PURGE" == "1" ]]; then
   rm -rf /etc/openvpn-manager /var/lib/openvpn-manager /etc/openvpn/server
   rm -f /root/openvpn-manager-credentials.txt
-  id -u openvpn-web >/dev/null 2>&1 && userdel openvpn-web || true
-  getent group openvpn-web >/dev/null && groupdel openvpn-web || true
+  if id -u openvpn-web >/dev/null 2>&1; then
+    userdel openvpn-web || true
+  fi
+  if getent group openvpn-web >/dev/null; then
+    groupdel openvpn-web || true
+  fi
   echo "应用及受管数据已彻底删除。备份位置：$BACKUP_DIR"
 else
   echo "服务已移除，PKI 和配置仍被保留。备份位置：$BACKUP_DIR"
