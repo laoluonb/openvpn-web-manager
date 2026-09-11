@@ -189,6 +189,24 @@ sudo ./install.sh --endpoint vpn.example.com
 如果旧安装恰好在生成密码后、写入最终凭据前中断，最新版会识别该未完成状态，自动生成新密码，
 并提前写入 `/root/openvpn-manager-credentials.txt`，避免再次中断后无法登录。
 
+如果 v1.1.1 在“正在配置 HTTPS”之后出现以下错误：
+
+```text
+cannot load certificate "/etc/openvpn-manager/tls/server.crt": No such file or directory
+```
+
+这是 v1.1.1 的配置目录命名不一致所致。v1.1.2 会先备份，再将
+`/etc/openvpn-web-manager` 和 `/var/lib/openvpn-web-manager` 中的认证配置、TLS 证书及客户端状态
+迁移到规范目录，并保留已经写入的控制台密码。更新后执行：
+
+```bash
+git pull
+sudo ./install.sh --existing-action preserve --endpoint vpn.example.com
+```
+
+请将 `vpn.example.com` 替换为首次安装使用的地址；如果首次安装自定义了 VPN 端口、管理端口、
+访问网段或证书，也应再次传入相同参数。
+
 ## 安全边界
 
 - 当前提供一个本地管理员账号。如需多用户或 MFA，请将控制台接入 SSO，或仅在私有管理网络开放。

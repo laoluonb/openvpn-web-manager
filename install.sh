@@ -2,12 +2,15 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.1.1"
+VERSION="1.1.2"
 INSTALL_DIR="/opt/$APP_NAME"
-CONFIG_DIR="/etc/$APP_NAME"
-STATE_DIR="/var/lib/$APP_NAME"
+CONFIG_DIR="/etc/openvpn-manager"
+STATE_DIR="/var/lib/openvpn-manager"
+LEGACY_CONFIG_DIR="/etc/openvpn-web-manager"
+LEGACY_STATE_DIR="/var/lib/openvpn-web-manager"
 OPENVPN_DIR="/etc/openvpn/server"
 EASYRSA_DIR="$OPENVPN_DIR/easy-rsa"
+CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 WEB_USER="openvpn-web"
 WEB_GROUP="openvpn-web"
 VPN_SUBNET="10.8.0.0/24"
@@ -135,8 +138,10 @@ backup_existing_openvpn() {
   for relative in \
     etc/openvpn \
     etc/openvpn-manager \
+    etc/openvpn-web-manager \
     var/lib/openvpn \
     var/lib/openvpn-manager \
+    var/lib/openvpn-web-manager \
     var/log/openvpn; do
     [[ -e "/$relative" ]] && archive_paths+=("$relative")
   done
@@ -165,6 +170,44 @@ EOF
   log "已有 OpenVPN 配置已备份到 $BACKUP_DIR"
 }
 
+migrate_legacy_tree() {
+  local source="$1"
+  local destination="$2"
+  local description="$3"
+
+  [[ -e "$source" ]] || return 0
+  [[ ! -L "$source" && -d "$source" ]] || \
+    die "旧版${description}路径不是安全的目录，已停止迁移：$source"
+
+  if [[ ! -e "$destination" ]]; then
+    mv -- "$source" "$destination"
+  else
+    [[ ! -L "$destination" && -d "$destination" ]] || \
+      die "新版${description}路径不是安全的目录，已停止迁移：$destination"
+    cp -a --no-clobber "$source/." "$destination/"
+    rm -rf -- "$source"
+  fi
+
+  log "已将旧版${description}迁移到 $destination"
+}
+
+migrate_legacy_manager_paths() {
+  local migration_needed="0"
+  if [[ -e "$LEGACY_CONFIG_DIR" || -e "$LEGACY_STATE_DIR" ]]; then
+    migration_needed="1"
+    log "检测到 v1.1.1 旧版目录，正在迁移受管配置和客户端状态"
+  fi
+
+  migrate_legacy_tree "$LEGACY_CONFIG_DIR" "$CONFIG_DIR" "配置目录"
+  migrate_legacy_tree "$LEGACY_STATE_DIR" "$STATE_DIR" "状态目录"
+
+  if [[ "$migration_needed" == "1" && -s "$CREDENTIAL_FILE" ]]; then
+    sed -i "s|$LEGACY_STATE_DIR|$STATE_DIR|g" "$CREDENTIAL_FILE"
+    chmod 0600 "$CREDENTIAL_FILE"
+    log "已保留现有控制台凭据并更新其中的客户端路径"
+  fi
+}
+
 remove_existing_openvpn_state() {
   local custom_units=()
   mapfile -t custom_units < <(
@@ -176,8 +219,8 @@ remove_existing_openvpn_state() {
     rm -rf -- "${custom_units[@]}"
   fi
   rm -rf /etc/openvpn /var/lib/openvpn /var/log/openvpn
-  if [[ "$MANAGED_EXISTING" == "1" ]]; then
-    rm -rf "$CONFIG_DIR" "$STATE_DIR"
+  if [[ "$MANAGED_EXISTING" == "1" || "$EXISTING_ACTION" == "remove" ]]; then
+    rm -rf "$CONFIG_DIR" "$STATE_DIR" "$LEGACY_CONFIG_DIR" "$LEGACY_STATE_DIR"
     if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
       rm -rf "$INSTALL_DIR"
     fi
@@ -202,7 +245,19 @@ if [[ -n "$(find /etc/openvpn -type f \
   -print -quit 2>/dev/null)" ]]; then
   OPENVPN_CONFIG_PRESENT="1"
 fi
-if [[ -s "$CONFIG_DIR/server.json" || -s "$CONFIG_DIR/install-state.json" ]]; then
+if [[ -s "$CONFIG_DIR/server.json" \
+  || -s "$CONFIG_DIR/web.json" \
+  || -s "$CONFIG_DIR/install-state.json" \
+  || -s "$CONFIG_DIR/tls/server.crt" \
+  || -s "$CONFIG_DIR/tls/server.key" \
+  || -s "$LEGACY_CONFIG_DIR/server.json" \
+  || -s "$LEGACY_CONFIG_DIR/web.json" \
+  || -s "$LEGACY_CONFIG_DIR/install-state.json" \
+  || -s "$LEGACY_CONFIG_DIR/tls/server.crt" \
+  || -s "$LEGACY_CONFIG_DIR/tls/server.key" \
+  || -d "$STATE_DIR/clients" \
+  || -d "$LEGACY_STATE_DIR/clients" \
+  || -f /etc/systemd/system/openvpn-web-manager.service ]]; then
   MANAGED_EXISTING="1"
 fi
 
@@ -289,6 +344,8 @@ log "正在安装应用文件"
 getent group "$WEB_GROUP" >/dev/null || groupadd --system "$WEB_GROUP"
 id -u "$WEB_USER" >/dev/null 2>&1 || \
   useradd --system --gid "$WEB_GROUP" --home-dir /nonexistent --shell /usr/sbin/nologin "$WEB_USER"
+
+migrate_legacy_manager_paths
 
 install -d -m 0755 "$INSTALL_DIR" "$INSTALL_DIR/backend" "$INSTALL_DIR/web"
 cp -a "$SCRIPT_DIR/backend/." "$INSTALL_DIR/backend/"
@@ -391,7 +448,6 @@ chown root:"$WEB_GROUP" "$CONFIG_DIR/server.json"
 chmod 0640 "$CONFIG_DIR/server.json"
 
 log "正在配置控制台认证"
-CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 WEB_CONFIG_EXISTS="0"
 if [[ -s "$CONFIG_DIR/web.json" && "$PASSWORD_EXPLICIT" == "0" ]]; then
   if [[ -s "$CONFIG_DIR/install-state.json" || -s "$CREDENTIAL_FILE" || -f /etc/systemd/system/openvpn-web-manager.service ]]; then

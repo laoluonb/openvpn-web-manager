@@ -1,5 +1,16 @@
 # 更新日志
 
+## 1.1.2 - 2026-09-11
+
+- 修复安装器将受管配置写入 `/etc/openvpn-web-manager`、将状态写入
+  `/var/lib/openvpn-web-manager`，而 Nginx、systemd 和后端统一读取
+  `/etc/openvpn-manager` 与 `/var/lib/openvpn-manager`，导致 HTTPS 配置阶段找不到证书的问题。
+- 安装器现在会识别 v1.1.1 遗留的配置、Web 认证、TLS 证书和客户端状态；在备份后将其安全
+  迁移到规范目录，并保留 `/root/openvpn-manager-credentials.txt` 中的现有控制台密码。
+- `preserve` 备份现在同时包含规范目录和 v1.1.1 遗留目录；`remove` 与 `--purge` 会同时清理
+  两组目录，避免残留配置影响后续安装。
+- 新增部署路径一致性和旧目录迁移回归测试。
+
 ## 1.1.1 - 2026-09-11
 
 - 修复安装在控制台认证之后中断时，仅保存密码哈希但尚未保存明文凭据，导致再次执行后用户

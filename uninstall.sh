@@ -2,6 +2,10 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
+CONFIG_DIR="/etc/openvpn-manager"
+STATE_DIR="/var/lib/openvpn-manager"
+LEGACY_CONFIG_DIR="/etc/openvpn-web-manager"
+LEGACY_STATE_DIR="/var/lib/openvpn-web-manager"
 PURGE="0"
 ASSUME_YES="0"
 
@@ -36,7 +40,10 @@ fi
 
 BACKUP_DIR="/var/backups/$APP_NAME/uninstall-$(date -u +%Y%m%dT%H%M%SZ)"
 install -d -m 0700 "$BACKUP_DIR"
-[[ -d /etc/openvpn-manager ]] && cp -a /etc/openvpn-manager "$BACKUP_DIR/manager-config"
+[[ -d "$CONFIG_DIR" ]] && cp -a "$CONFIG_DIR" "$BACKUP_DIR/manager-config"
+[[ -d "$STATE_DIR" ]] && cp -a "$STATE_DIR" "$BACKUP_DIR/manager-state"
+[[ -d "$LEGACY_CONFIG_DIR" ]] && cp -a "$LEGACY_CONFIG_DIR" "$BACKUP_DIR/legacy-manager-config"
+[[ -d "$LEGACY_STATE_DIR" ]] && cp -a "$LEGACY_STATE_DIR" "$BACKUP_DIR/legacy-manager-state"
 [[ -d /etc/openvpn/server/easy-rsa/pki ]] && \
   tar -C /etc/openvpn/server/easy-rsa -czf "$BACKUP_DIR/pki.tar.gz" pki
 
@@ -62,7 +69,7 @@ rm -rf /opt/openvpn-web-manager
 systemctl daemon-reload
 
 if [[ "$PURGE" == "1" ]]; then
-  rm -rf /etc/openvpn-manager /var/lib/openvpn-manager /etc/openvpn/server
+  rm -rf "$CONFIG_DIR" "$STATE_DIR" "$LEGACY_CONFIG_DIR" "$LEGACY_STATE_DIR" /etc/openvpn/server
   rm -f /root/openvpn-manager-credentials.txt
   if id -u openvpn-web >/dev/null 2>&1; then
     userdel openvpn-web || true
