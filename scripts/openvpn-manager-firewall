@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 ENV_FILE="${OPENVPN_MANAGER_FIREWALL_ENV:-/etc/openvpn-manager/firewall.env}"
 TAG="openvpn-web-manager"
+INPUT_CHAIN="OVPNMGR_INPUT"
+FORWARD_CHAIN="OVPNMGR_FORWARD"
+NAT_CHAIN="OVPNMGR_NAT"
 
 if [[ ! -r "$ENV_FILE" ]]; then
   echo "缺少防火墙配置：$ENV_FILE" >&2
@@ -13,11 +16,13 @@ fi
 source "$ENV_FILE"
 
 : "${PUBLIC_INTERFACE:?PUBLIC_INTERFACE is required}"
+: "${VPN_INTERFACE:=tun0}"
 : "${VPN_SUBNET:?VPN_SUBNET is required}"
 : "${VPN_PORT:?VPN_PORT is required}"
 : "${VPN_PROTOCOL:=udp}"
 : "${WEB_PORT:?WEB_PORT is required}"
 : "${WEB_ALLOW:=0.0.0.0/0}"
+: "${CLIENT_ROUTES_FILE:=/etc/openvpn-manager/client-routes.conf}"
 
 command -v iptables >/dev/null 2>&1 || {
   echo "需要安装 iptables" >&2
@@ -48,20 +53,83 @@ del_nat() {
   done
 }
 
-start_rules() {
-  add_filter INPUT -p "$VPN_PROTOCOL" --dport "$VPN_PORT" -m comment --comment "$TAG-vpn" -j ACCEPT
-  add_filter INPUT -p tcp -s "$WEB_ALLOW" --dport "$WEB_PORT" -m comment --comment "$TAG-web" -j ACCEPT
-  add_filter FORWARD -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-forward-out" -j ACCEPT
-  add_filter FORWARD -d "$VPN_SUBNET" -i "$PUBLIC_INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-forward-in" -j ACCEPT
-  add_nat POSTROUTING -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-nat" -j MASQUERADE
-}
+filter_chain_exists() { iptables -w 5 -S "$1" >/dev/null 2>&1; }
+nat_chain_exists() { iptables -w 5 -t nat -S "$1" >/dev/null 2>&1; }
 
-stop_rules() {
+cleanup_legacy_rules() {
   del_nat POSTROUTING -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-nat" -j MASQUERADE
   del_filter FORWARD -d "$VPN_SUBNET" -i "$PUBLIC_INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-forward-in" -j ACCEPT
   del_filter FORWARD -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-forward-out" -j ACCEPT
   del_filter INPUT -p tcp -s "$WEB_ALLOW" --dport "$WEB_PORT" -m comment --comment "$TAG-web" -j ACCEPT
   del_filter INPUT -p "$VPN_PROTOCOL" --dport "$VPN_PORT" -m comment --comment "$TAG-vpn" -j ACCEPT
+}
+
+prepare_chains() {
+  filter_chain_exists "$INPUT_CHAIN" || iptables -w 5 -N "$INPUT_CHAIN"
+  filter_chain_exists "$FORWARD_CHAIN" || iptables -w 5 -N "$FORWARD_CHAIN"
+  nat_chain_exists "$NAT_CHAIN" || iptables -w 5 -t nat -N "$NAT_CHAIN"
+  iptables -w 5 -F "$INPUT_CHAIN"
+  iptables -w 5 -F "$FORWARD_CHAIN"
+  iptables -w 5 -t nat -F "$NAT_CHAIN"
+  add_filter INPUT -j "$INPUT_CHAIN"
+  add_filter FORWARD -j "$FORWARD_CHAIN"
+  add_nat POSTROUTING -j "$NAT_CHAIN"
+}
+
+append_client_route_policy() {
+  local subnet mode
+  [[ -r "$CLIENT_ROUTES_FILE" ]] || return 0
+  while read -r subnet mode _rest; do
+    [[ -n "${subnet:-}" ]] || continue
+    case "$mode" in
+      allow)
+        iptables -w 5 -A "$FORWARD_CHAIN" -i "$VPN_INTERFACE" -o "$VPN_INTERFACE" -s "$VPN_SUBNET" -d "$subnet" -m comment --comment "$TAG-client-lan" -j ACCEPT
+        iptables -w 5 -A "$FORWARD_CHAIN" -i "$VPN_INTERFACE" -o "$VPN_INTERFACE" -s "$subnet" -d "$VPN_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-client-lan-return" -j ACCEPT
+        ;;
+      deny)
+        iptables -w 5 -A "$FORWARD_CHAIN" -i "$VPN_INTERFACE" -o "$VPN_INTERFACE" -s "$VPN_SUBNET" -d "$subnet" -m comment --comment "$TAG-client-lan-deny" -j DROP
+        iptables -w 5 -A "$FORWARD_CHAIN" -i "$VPN_INTERFACE" -o "$VPN_INTERFACE" -s "$subnet" -d "$VPN_SUBNET" -m comment --comment "$TAG-client-lan-deny-return" -j DROP
+        ;;
+      *)
+        echo "忽略无效的客户端路由策略：$subnet $mode" >&2
+        ;;
+    esac
+  done <"$CLIENT_ROUTES_FILE"
+}
+
+start_rules() {
+  cleanup_legacy_rules
+  prepare_chains
+  iptables -w 5 -A "$INPUT_CHAIN" -p "$VPN_PROTOCOL" --dport "$VPN_PORT" -m comment --comment "$TAG-vpn" -j ACCEPT
+  iptables -w 5 -A "$INPUT_CHAIN" -p tcp -s "$WEB_ALLOW" --dport "$WEB_PORT" -m comment --comment "$TAG-web" -j ACCEPT
+  iptables -w 5 -A "$INPUT_CHAIN" -j RETURN
+
+  append_client_route_policy
+  iptables -w 5 -A "$FORWARD_CHAIN" -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-forward-out" -j ACCEPT
+  iptables -w 5 -A "$FORWARD_CHAIN" -d "$VPN_SUBNET" -i "$PUBLIC_INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-forward-in" -j ACCEPT
+  iptables -w 5 -A "$FORWARD_CHAIN" -j RETURN
+
+  iptables -w 5 -t nat -A "$NAT_CHAIN" -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-nat" -j MASQUERADE
+  iptables -w 5 -t nat -A "$NAT_CHAIN" -j RETURN
+}
+
+stop_rules() {
+  cleanup_legacy_rules
+  del_filter INPUT -j "$INPUT_CHAIN"
+  del_filter FORWARD -j "$FORWARD_CHAIN"
+  del_nat POSTROUTING -j "$NAT_CHAIN"
+  if filter_chain_exists "$INPUT_CHAIN"; then
+    iptables -w 5 -F "$INPUT_CHAIN"
+    iptables -w 5 -X "$INPUT_CHAIN"
+  fi
+  if filter_chain_exists "$FORWARD_CHAIN"; then
+    iptables -w 5 -F "$FORWARD_CHAIN"
+    iptables -w 5 -X "$FORWARD_CHAIN"
+  fi
+  if nat_chain_exists "$NAT_CHAIN"; then
+    iptables -w 5 -t nat -F "$NAT_CHAIN"
+    iptables -w 5 -t nat -X "$NAT_CHAIN"
+  fi
 }
 
 case "${1:-}" in

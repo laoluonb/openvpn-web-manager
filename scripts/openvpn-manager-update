@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONFIG_FILE="/etc/openvpn-manager/server.json"
+REQUEST_FILE="/var/lib/openvpn-manager/update-request.json"
+STATUS_FILE="/var/lib/openvpn-manager/update-status.json"
+LOCK_FILE="/run/openvpn-manager/update.lock"
+REPOSITORY="laoluonb/openvpn-web-manager"
+WORK_DIR=""
+UPDATE_FINISHED="0"
+
+write_status() {
+  local state="$1"
+  local message="$2"
+  local version="${3:-}"
+  python3 - "$STATUS_FILE" "$state" "$message" "$version" <<'PY'
+import datetime, json, os, pathlib, sys, tempfile
+path, state, message, version = sys.argv[1:]
+target = pathlib.Path(path)
+target.parent.mkdir(parents=True, exist_ok=True)
+data = {
+    "state": state,
+    "message": message,
+    "target_version": version or None,
+    "updated_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+fd, temp_name = tempfile.mkstemp(prefix=".update-status.", suffix=".json", dir=target.parent)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temp_name, 0o640)
+    try:
+        import grp
+        os.chown(temp_name, 0, grp.getgrnam("openvpn-web").gr_gid)
+    except (KeyError, PermissionError):
+        pass
+    os.replace(temp_name, target)
+finally:
+    if os.path.exists(temp_name):
+        os.unlink(temp_name)
+PY
+}
+
+cleanup() {
+  [[ -z "$WORK_DIR" || ! -d "$WORK_DIR" ]] || rm -rf -- "$WORK_DIR"
+}
+
+on_error() {
+  local exit_code="$1"
+  local line_number="$2"
+  if [[ "$UPDATE_FINISHED" != "1" ]]; then
+    write_status "failed" "更新失败（脚本第 ${line_number} 行，状态码 ${exit_code}）。请查看 journalctl -u openvpn-manager-update。"
+  fi
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
+trap 'on_error "$?" "$LINENO"' ERR
+
+install -d -m 0750 /run/openvpn-manager /var/lib/openvpn-manager
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  write_status "failed" "已有更新任务正在运行。"
+  exit 1
+fi
+
+[[ -r "$CONFIG_FILE" ]] || {
+  write_status "failed" "缺少服务端配置 $CONFIG_FILE。"
+  exit 1
+}
+
+MODE="$(python3 - "$REQUEST_FILE" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    data = {}
+print(data.get("mode", "all"))
+PY
+)"
+[[ "$MODE" == "all" ]] || {
+  write_status "failed" "不支持的更新模式：$MODE"
+  exit 2
+}
+
+write_status "running" "正在检查 GitHub 最新稳定版本并更新 OpenVPN 软件包。"
+WORK_DIR="$(mktemp -d /tmp/openvpn-manager-update.XXXXXX)"
+META_FILE="$WORK_DIR/release.json"
+ARCHIVE_FILE="$WORK_DIR/release.tar.gz"
+EXTRACT_DIR="$WORK_DIR/source"
+mkdir -p "$EXTRACT_DIR"
+
+curl --proto '=https' --tlsv1.2 -fsSL \
+  -H 'Accept: application/vnd.github+json' \
+  -H 'X-GitHub-Api-Version: 2022-11-28' \
+  -H 'User-Agent: openvpn-web-manager-updater' \
+  "https://api.github.com/repos/$REPOSITORY/releases/latest" \
+  -o "$META_FILE"
+
+mapfile -t RELEASE_INFO < <(python3 - "$META_FILE" <<'PY'
+import json, pathlib, re, sys
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+tag = str(data.get("tag_name", "")).strip()
+url = str(data.get("tarball_url", "")).strip()
+if not re.fullmatch(r"v?[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z.-]+)?", tag) or not url.startswith("https://api.github.com/"):
+    raise SystemExit("GitHub 发布信息无效")
+print(tag)
+print(url)
+PY
+)
+TARGET_VERSION="${RELEASE_INFO[0]}"
+TARBALL_URL="${RELEASE_INFO[1]}"
+CURRENT_VERSION="$(python3 - <<'PY'
+import json, pathlib
+path = pathlib.Path("/etc/openvpn-manager/install-state.json")
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    data = {}
+print(str(data.get("version", "")).strip().removeprefix("v"))
+PY
+)"
+if [[ -n "$CURRENT_VERSION" ]] && dpkg --compare-versions "${TARGET_VERSION#v}" lt "$CURRENT_VERSION"; then
+  write_status "failed" "GitHub 最新稳定版 $TARGET_VERSION 低于当前版本 v$CURRENT_VERSION，已拒绝降级。" "$TARGET_VERSION"
+  UPDATE_FINISHED="1"
+  exit 1
+fi
+write_status "running" "正在下载管理面板 $TARGET_VERSION。" "$TARGET_VERSION"
+
+curl --proto '=https' --tlsv1.2 -fsSL \
+  -H 'Accept: application/vnd.github+json' \
+  -H 'User-Agent: openvpn-web-manager-updater' \
+  "$TARBALL_URL" -o "$ARCHIVE_FILE"
+
+python3 - "$ARCHIVE_FILE" "$EXTRACT_DIR" <<'PY'
+import pathlib, sys, tarfile
+archive, destination = map(pathlib.Path, sys.argv[1:])
+root = destination.resolve()
+with tarfile.open(archive, "r:gz") as bundle:
+    members = bundle.getmembers()
+    if len(members) > 5000 or sum(member.size for member in members) > 100 * 1024 * 1024:
+        raise SystemExit("更新包超过安全大小限制")
+    for member in members:
+        candidate = (root / member.name).resolve()
+        if root != candidate and root not in candidate.parents:
+            raise SystemExit("更新包包含不安全路径")
+        if not (member.isdir() or member.isfile()):
+            raise SystemExit("更新包包含不允许的特殊文件")
+    bundle.extractall(destination, members=members)
+PY
+
+SOURCE_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[[ -n "$SOURCE_DIR" && -f "$SOURCE_DIR/install.sh" ]] || {
+  write_status "failed" "下载的发布包中缺少 install.sh。" "$TARGET_VERSION"
+  exit 1
+}
+
+mapfile -t SETTINGS < <(python3 - "$CONFIG_FILE" <<'PY'
+import json, pathlib, sys
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+values = [
+    data["endpoint"],
+    data.get("vpn_protocol", "udp"),
+    data.get("web_port", 8443),
+    data.get("web_allow", "0.0.0.0/0"),
+    data.get("vpn_subnet", "10.8.0.0/24"),
+    ",".join(data.get("dns_servers", ["1.1.1.1", "9.9.9.9"])),
+    "yes" if data.get("redirect_gateway", True) else "no",
+    data.get("max_clients", 100),
+]
+for value in values:
+    print(value)
+PY
+)
+
+write_status "running" "正在备份配置、升级 OpenVPN 并安装管理面板 $TARGET_VERSION。" "$TARGET_VERSION"
+bash "$SOURCE_DIR/install.sh" \
+  --existing-action preserve \
+  --endpoint "${SETTINGS[0]}" \
+  --vpn-port random \
+  --vpn-protocol "${SETTINGS[1]}" \
+  --web-port "${SETTINGS[2]}" \
+  --web-allow "${SETTINGS[3]}" \
+  --vpn-subnet "${SETTINGS[4]}" \
+  --dns-servers "${SETTINGS[5]}" \
+  --redirect-gateway "${SETTINGS[6]}" \
+  --max-clients "${SETTINGS[7]}"
+
+UPDATE_FINISHED="1"
+write_status "completed" "管理面板与 OpenVPN 已更新完成，OpenVPN 端口已重新随机；请放行新端口并重新下载客户端配置。" "$TARGET_VERSION"

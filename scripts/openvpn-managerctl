@@ -40,20 +40,47 @@ def main() -> int:
     sub.add_parser("list")
     create = sub.add_parser("create")
     create.add_argument("name")
+    create.add_argument("--lan-subnet", default="")
+    create.add_argument("--share-lan", action="store_true")
+    network = sub.add_parser("network")
+    network.add_argument("name")
+    network.add_argument("lan_subnet", nargs="?", default="")
+    network.add_argument("--share-lan", action="store_true")
+    disconnect = sub.add_parser("disconnect")
+    disconnect.add_argument("name")
+    profile = sub.add_parser("profile")
+    profile.add_argument("name")
     revoke = sub.add_parser("revoke")
     revoke.add_argument("name")
     logs = sub.add_parser("logs")
     logs.add_argument("lines", nargs="?", type=int, default=100)
     sub.add_parser("restart")
+    sub.add_parser("update")
+    sub.add_parser("update-status")
     args = parser.parse_args()
 
     actions = {
         "status": {"action": "status"},
         "list": {"action": "list_clients"},
-        "create": {"action": "create_client", "name": getattr(args, "name", "")},
+        "create": {
+            "action": "create_client",
+            "name": getattr(args, "name", ""),
+            "lan_subnet": getattr(args, "lan_subnet", ""),
+            "share_lan": getattr(args, "share_lan", False),
+        },
+        "network": {
+            "action": "set_client_network",
+            "name": getattr(args, "name", ""),
+            "lan_subnet": getattr(args, "lan_subnet", ""),
+            "share_lan": getattr(args, "share_lan", False),
+        },
+        "disconnect": {"action": "disconnect_client", "name": getattr(args, "name", "")},
+        "profile": {"action": "get_profile", "name": getattr(args, "name", "")},
         "revoke": {"action": "revoke_client", "name": getattr(args, "name", "")},
         "logs": {"action": "logs", "lines": getattr(args, "lines", 100)},
         "restart": {"action": "restart"},
+        "update": {"action": "start_update"},
+        "update-status": {"action": "update_status"},
     }
     try:
         result = request(actions[args.command])

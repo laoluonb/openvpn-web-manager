@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.1.2"
+VERSION="1.2.0"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -14,11 +14,15 @@ CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 WEB_USER="openvpn-web"
 WEB_GROUP="openvpn-web"
 VPN_SUBNET="10.8.0.0/24"
-VPN_NETWORK="10.8.0.0"
-VPN_NETMASK="255.255.255.0"
+VPN_PROTOCOL="udp"
+DNS_SERVERS="1.1.1.1,9.9.9.9"
+REDIRECT_GATEWAY="yes"
+MAX_CLIENTS="100"
+OLD_VPN_PORT=""
+OLD_VPN_SUBNET=""
 
 ENDPOINT=""
-VPN_PORT="1194"
+VPN_PORT="random"
 WEB_PORT="8443"
 WEB_ALLOW="0.0.0.0/0"
 ADMIN_USER="admin"
@@ -32,6 +36,14 @@ EXISTING_BACKUP=""
 MANAGED_EXISTING="0"
 OPENVPN_CONFIG_PRESENT="0"
 OPENVPN_PACKAGE_PRESENT="0"
+ENDPOINT_EXPLICIT="0"
+VPN_PROTOCOL_EXPLICIT="0"
+VPN_SUBNET_EXPLICIT="0"
+DNS_SERVERS_EXPLICIT="0"
+REDIRECT_GATEWAY_EXPLICIT="0"
+MAX_CLIENTS_EXPLICIT="0"
+WEB_PORT_EXPLICIT="0"
+WEB_ALLOW_EXPLICIT="0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -43,7 +55,12 @@ OpenVPN 管理中心安装器
 
 选项：
   --endpoint HOST          公网 IPv4 地址或域名
-  --vpn-port PORT          OpenVPN UDP 端口（默认：1194）
+  --vpn-port PORT          OpenVPN 服务端口（每次安装默认随机 10000-29999；可指定固定端口）
+  --vpn-protocol PROTO     OpenVPN 协议：udp 或 tcp（默认：udp）
+  --vpn-subnet CIDR        VPN 私有子网（默认：10.8.0.0/24）
+  --dns-servers LIST       推送的 DNS，逗号分隔（默认：1.1.1.1,9.9.9.9）
+  --redirect-gateway MODE  是否转发客户端全部流量：yes 或 no（默认：yes）
+  --max-clients COUNT      最大并发客户端数（默认：100）
   --web-port PORT          HTTPS 管理端口（默认：8443）
   --web-allow CIDR         允许访问控制台的来源（默认：0.0.0.0/0）
   --admin-user USER        控制台用户名（默认：admin）
@@ -63,10 +80,15 @@ die() { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 
 while (($#)); do
   case "$1" in
-    --endpoint) ENDPOINT="${2:-}"; shift 2 ;;
+    --endpoint) ENDPOINT="${2:-}"; ENDPOINT_EXPLICIT="1"; shift 2 ;;
     --vpn-port) VPN_PORT="${2:-}"; shift 2 ;;
-    --web-port) WEB_PORT="${2:-}"; shift 2 ;;
-    --web-allow) WEB_ALLOW="${2:-}"; shift 2 ;;
+    --vpn-protocol) VPN_PROTOCOL="${2:-}"; VPN_PROTOCOL_EXPLICIT="1"; shift 2 ;;
+    --vpn-subnet) VPN_SUBNET="${2:-}"; VPN_SUBNET_EXPLICIT="1"; shift 2 ;;
+    --dns-servers) DNS_SERVERS="${2:-}"; DNS_SERVERS_EXPLICIT="1"; shift 2 ;;
+    --redirect-gateway) REDIRECT_GATEWAY="${2:-}"; REDIRECT_GATEWAY_EXPLICIT="1"; shift 2 ;;
+    --max-clients) MAX_CLIENTS="${2:-}"; MAX_CLIENTS_EXPLICIT="1"; shift 2 ;;
+    --web-port) WEB_PORT="${2:-}"; WEB_PORT_EXPLICIT="1"; shift 2 ;;
+    --web-allow) WEB_ALLOW="${2:-}"; WEB_ALLOW_EXPLICIT="1"; shift 2 ;;
     --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
     --admin-password) ADMIN_PASSWORD="${2:-}"; PASSWORD_EXPLICIT="1"; shift 2 ;;
     --initial-client) INITIAL_CLIENT="${2:-}"; shift 2 ;;
@@ -82,26 +104,47 @@ done
 [[ -f "$SCRIPT_DIR/backend/agent.py" && -f "$SCRIPT_DIR/web/index.html" ]] || \
   die "请在完整的项目目录中运行 install.sh。"
 [[ -d /run/systemd/system ]] || die "系统必须使用 systemd。"
-if [[ ! "$VPN_PORT" =~ ^[0-9]+$ ]] || ((VPN_PORT < 1 || VPN_PORT > 65535)); then
-  die "VPN 端口无效。"
-fi
-if [[ ! "$WEB_PORT" =~ ^[0-9]+$ ]] || ((WEB_PORT < 1 || WEB_PORT > 65535)); then
-  die "管理端口无效。"
-fi
-[[ "$VPN_PORT" != "$WEB_PORT" ]] || die "VPN 端口和管理端口不能相同。"
-[[ "$ADMIN_USER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] || die "管理员用户名无效。"
-[[ "$INITIAL_CLIENT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$ ]] || die "首个客户端名称无效。"
-[[ "$WEB_ALLOW" =~ ^[0-9./]+$ ]] || die "--web-allow 必须是 IPv4 CIDR。"
-case "$EXISTING_ACTION" in
-  auto|preserve|remove|abort) ;;
-  *) die "--existing-action 只能是 preserve、remove 或 abort。" ;;
-esac
-if [[ -n "$ENDPOINT" ]]; then
-  [[ "$ENDPOINT" =~ ^[A-Za-z0-9.-]+$ ]] || die "公网地址必须是域名或 IPv4 地址。"
-fi
-if [[ -n "$TLS_CERT" || -n "$TLS_KEY" ]]; then
-  [[ -r "$TLS_CERT" && -r "$TLS_KEY" ]] || die "--tls-cert 和 --tls-key 必须同时存在且可读。"
-fi
+
+validate_options() {
+  [[ "${VPN_PORT,,}" != "random" ]] || VPN_PORT="random"
+  if [[ "$VPN_PORT" != "random" && ! "$VPN_PORT" =~ ^[0-9]+$ ]]; then
+    die "VPN 端口无效。"
+  fi
+  if [[ "$VPN_PORT" != "random" ]] && ((VPN_PORT < 1 || VPN_PORT > 65535)); then
+    die "VPN 端口无效。"
+  fi
+  if [[ ! "$WEB_PORT" =~ ^[0-9]+$ ]] || ((WEB_PORT < 1 || WEB_PORT > 65535)); then
+    die "管理端口无效。"
+  fi
+  [[ "$VPN_PORT" == "random" || "$VPN_PORT" != "$WEB_PORT" ]] || die "VPN 端口和管理端口不能相同。"
+  case "${VPN_PROTOCOL,,}" in
+    udp|tcp) VPN_PROTOCOL="${VPN_PROTOCOL,,}" ;;
+    *) die "--vpn-protocol 只能是 udp 或 tcp。" ;;
+  esac
+  case "${REDIRECT_GATEWAY,,}" in
+    yes|true|1) REDIRECT_GATEWAY="yes" ;;
+    no|false|0) REDIRECT_GATEWAY="no" ;;
+    *) die "--redirect-gateway 只能是 yes 或 no。" ;;
+  esac
+  if [[ ! "$MAX_CLIENTS" =~ ^[0-9]+$ ]] || ((MAX_CLIENTS < 1 || MAX_CLIENTS > 1000)); then
+    die "--max-clients 必须是 1 到 1000 的整数。"
+  fi
+  [[ "$ADMIN_USER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] || die "管理员用户名无效。"
+  [[ "$INITIAL_CLIENT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$ ]] || die "首个客户端名称无效。"
+  [[ "$WEB_ALLOW" =~ ^[0-9./]+$ ]] || die "--web-allow 必须是 IPv4 CIDR。"
+  case "$EXISTING_ACTION" in
+    auto|preserve|remove|abort) ;;
+    *) die "--existing-action 只能是 preserve、remove 或 abort。" ;;
+  esac
+  if [[ -n "$ENDPOINT" ]]; then
+    [[ "$ENDPOINT" =~ ^[A-Za-z0-9.-]+$ ]] || die "公网地址必须是域名或 IPv4 地址。"
+  fi
+  if [[ -n "$TLS_CERT" || -n "$TLS_KEY" ]]; then
+    [[ -r "$TLS_CERT" && -r "$TLS_KEY" ]] || die "--tls-cert 和 --tls-key 必须同时存在且可读。"
+  fi
+}
+
+validate_options
 
 if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091
@@ -123,7 +166,7 @@ stop_existing_openvpn_units() {
   local units=()
   mapfile -t units < <(
     systemctl list-units --all --type=service --no-legend 'openvpn*' 2>/dev/null \
-      | awk '{print $1}' \
+      | awk '$1 == "openvpn.service" || $1 ~ /^openvpn@.*\.service$/ || $1 ~ /^openvpn-server@.*\.service$/ {print $1}' \
       | sed '/^$/d'
   )
   if ((${#units[@]})); then
@@ -227,8 +270,10 @@ remove_existing_openvpn_state() {
     rm -f \
       /etc/systemd/system/openvpn-web-manager.service \
       /etc/systemd/system/openvpn-manager-agent.service \
+      /etc/systemd/system/openvpn-manager-update.service \
       /etc/systemd/system/openvpn-manager-firewall.service \
       /usr/local/sbin/openvpn-manager-firewall \
+      /usr/local/sbin/openvpn-manager-update \
       /usr/local/bin/openvpn-managerctl \
       /etc/nginx/sites-enabled/openvpn-web-manager \
       /etc/nginx/sites-available/openvpn-web-manager \
@@ -312,10 +357,89 @@ elif [[ "$OPENVPN_PACKAGE_PRESENT" == "1" ]]; then
   esac
 fi
 
+load_preserved_server_settings() {
+  local source=""
+  local values=()
+  [[ "$MANAGED_EXISTING" == "1" && "$EXISTING_ACTION" == "preserve" ]] || return 0
+  if [[ -s "$CONFIG_DIR/server.json" ]]; then
+    source="$CONFIG_DIR/server.json"
+  elif [[ -s "$LEGACY_CONFIG_DIR/server.json" ]]; then
+    source="$LEGACY_CONFIG_DIR/server.json"
+  else
+    return 0
+  fi
+
+  mapfile -t values < <(python3 - "$source" <<'PY'
+import json, pathlib, sys
+
+data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(data.get("endpoint", ""))
+print(data.get("vpn_port", 1194))
+print(data.get("vpn_protocol", "udp"))
+print(data.get("vpn_subnet", "10.8.0.0/24"))
+print(",".join(data.get("dns_servers", ["1.1.1.1", "9.9.9.9"])))
+print("yes" if data.get("redirect_gateway", True) else "no")
+print(data.get("max_clients", 100))
+print(data.get("web_port", 8443))
+print(data.get("web_allow", "0.0.0.0/0"))
+PY
+  ) || die "无法读取已有服务端设置：$source"
+  ((${#values[@]} == 9)) || die "已有服务端设置内容不完整：$source"
+
+  OLD_VPN_SUBNET="${values[3]}"
+  OLD_VPN_PORT="${values[1]}"
+  [[ "$ENDPOINT_EXPLICIT" == "1" ]] || ENDPOINT="${values[0]}"
+  [[ "$VPN_PROTOCOL_EXPLICIT" == "1" ]] || VPN_PROTOCOL="${values[2]}"
+  [[ "$VPN_SUBNET_EXPLICIT" == "1" ]] || VPN_SUBNET="${values[3]}"
+  [[ "$DNS_SERVERS_EXPLICIT" == "1" ]] || DNS_SERVERS="${values[4]}"
+  [[ "$REDIRECT_GATEWAY_EXPLICIT" == "1" ]] || REDIRECT_GATEWAY="${values[5]}"
+  [[ "$MAX_CLIENTS_EXPLICIT" == "1" ]] || MAX_CLIENTS="${values[6]}"
+  [[ "$WEB_PORT_EXPLICIT" == "1" ]] || WEB_PORT="${values[7]}"
+  [[ "$WEB_ALLOW_EXPLICIT" == "1" ]] || WEB_ALLOW="${values[8]}"
+  log "已载入并保留现有服务端参数；VPN 端口将在本次安装中重新随机，命令行显式参数仍具有最高优先级"
+}
+
+generate_random_vpn_port() {
+  VPN_PORT="$(python3 - "$WEB_PORT" "$OLD_VPN_PORT" <<'PY'
+import secrets, socket, sys
+
+web_port = int(sys.argv[1])
+previous_port = int(sys.argv[2]) if sys.argv[2].isdigit() else None
+for _ in range(256):
+    port = 10000 + secrets.randbelow(20000)
+    if port == web_port or port == previous_port:
+        continue
+    opened = []
+    try:
+        for socket_type in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+            item = socket.socket(socket.AF_INET, socket_type)
+            opened.append(item)
+            item.bind(("0.0.0.0", port))
+    except OSError:
+        continue
+    finally:
+        for item in opened:
+            item.close()
+    print(port)
+    raise SystemExit(0)
+raise SystemExit("无法找到可用的随机 OpenVPN 端口")
+PY
+  )" || die "无法生成随机 OpenVPN 端口。"
+  if [[ -n "$OLD_VPN_PORT" ]]; then
+    log "本次安装已将 OpenVPN 端口从 $OLD_VPN_PORT 重新随机为：$VPN_PORT/$VPN_PROTOCOL"
+  else
+    log "本次安装已随机选择 OpenVPN 端口：$VPN_PORT/$VPN_PROTOCOL"
+  fi
+}
+
 log "正在安装系统软件包"
 apt-get update -y
 apt-get install -y --no-install-recommends \
-  openvpn easy-rsa python3 nginx openssl iptables iproute2 ca-certificates curl
+  openvpn easy-rsa python3 nginx openssl iptables iproute2 ca-certificates curl tar util-linux
+
+load_preserved_server_settings
+[[ "$VPN_PORT" != "random" ]] || generate_random_vpn_port
+validate_options
 
 python3 - "$WEB_ALLOW" <<'PY' || die "--web-allow 必须是有效的 IPv4 CIDR。"
 import ipaddress, sys
@@ -323,6 +447,33 @@ network = ipaddress.ip_network(sys.argv[1], strict=False)
 if network.version != 4:
     raise ValueError("必须使用 IPv4")
 PY
+
+VALIDATED_NETWORK_SETTINGS="$(python3 - "$VPN_SUBNET" "$DNS_SERVERS" <<'PY'
+import ipaddress, sys
+
+private = tuple(ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+network = ipaddress.ip_network(sys.argv[1], strict=False)
+if network.version != 4 or network.prefixlen < 8 or network.prefixlen > 29:
+    raise SystemExit("VPN 子网必须是 /8 到 /29 的 IPv4 私有网段")
+if not any(network.subnet_of(item) for item in private):
+    raise SystemExit("VPN 子网必须使用 10/8、172.16/12 或 192.168/16 私有地址")
+dns_servers = []
+for value in sys.argv[2].split(","):
+    value = value.strip()
+    if not value:
+        continue
+    address = ipaddress.ip_address(value)
+    if address.version != 4 or address.is_unspecified or address.is_multicast:
+        raise SystemExit(f"DNS 地址无效：{value}")
+    normalized = str(address)
+    if normalized not in dns_servers:
+        dns_servers.append(normalized)
+if len(dns_servers) > 3:
+    raise SystemExit("最多可以配置 3 个 DNS 服务器")
+print(f"{network.with_prefixlen}\t{','.join(dns_servers)}")
+PY
+)" || die "--vpn-subnet 或 --dns-servers 无效。"
+IFS=$'\t' read -r VPN_SUBNET DNS_SERVERS <<<"$VALIDATED_NETWORK_SETTINGS"
 
 if [[ -z "$ENDPOINT" ]]; then
   ENDPOINT="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
@@ -385,61 +536,49 @@ if [[ ! -f "$OPENVPN_DIR/tls-crypt.key" ]]; then
 fi
 chmod 0600 "$OPENVPN_DIR/tls-crypt.key"
 
-cat >"$OPENVPN_DIR/server.conf" <<EOF
-port $VPN_PORT
-proto udp
-dev tun
-topology subnet
-server $VPN_NETWORK $VPN_NETMASK
-ifconfig-pool-persist /var/lib/openvpn/server/ipp.txt
-client-config-dir $OPENVPN_DIR/ccd
-
-ca $OPENVPN_DIR/ca.crt
-cert $OPENVPN_DIR/server.crt
-key $OPENVPN_DIR/server.key
-dh none
-crl-verify $OPENVPN_DIR/crl.pem
-tls-crypt $OPENVPN_DIR/tls-crypt.key
-remote-cert-tls client
-tls-version-min 1.2
-
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-data-ciphers-fallback AES-256-GCM
-auth SHA256
-
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
-push "dhcp-option DNS 9.9.9.9"
-
-keepalive 10 120
-persist-key
-persist-tun
-user nobody
-group nogroup
-explicit-exit-notify 1
-max-clients 100
-status /var/log/openvpn/status.log 10
-status-version 3
-verb 3
-EOF
-chmod 0600 "$OPENVPN_DIR/server.conf"
-
-python3 - "$CONFIG_DIR/server.json" "$ENDPOINT" "$VPN_PORT" "$WEB_PORT" "$PUBLIC_INTERFACE" "$VPN_SUBNET" "$WEB_GROUP" <<'PY'
+python3 - "$CONFIG_DIR/server.json" "$ENDPOINT" "$VPN_PORT" "$VPN_PROTOCOL" "$WEB_PORT" "$WEB_ALLOW" "$PUBLIC_INTERFACE" "$VPN_SUBNET" "$DNS_SERVERS" "$REDIRECT_GATEWAY" "$MAX_CLIENTS" "$WEB_GROUP" <<'PY'
 import json, pathlib, sys
-path, endpoint, vpn_port, web_port, interface, subnet, web_group = sys.argv[1:]
+(
+    path,
+    endpoint,
+    vpn_port,
+    vpn_protocol,
+    web_port,
+    web_allow,
+    interface,
+    subnet,
+    dns_servers,
+    redirect_gateway,
+    max_clients,
+    web_group,
+) = sys.argv[1:]
 data = {
     "endpoint": endpoint,
     "vpn_port": int(vpn_port),
-    "vpn_protocol": "udp",
+    "vpn_protocol": vpn_protocol,
     "web_port": int(web_port),
+    "web_allow": web_allow,
     "public_interface": interface,
     "vpn_subnet": subnet,
+    "dns_servers": [item for item in dns_servers.split(",") if item],
+    "redirect_gateway": redirect_gateway == "yes",
+    "max_clients": int(max_clients),
     "server_name": "server",
     "easy_rsa_dir": "/etc/openvpn/server/easy-rsa",
     "openvpn_dir": "/etc/openvpn/server",
     "state_dir": "/var/lib/openvpn-manager",
     "status_file": "/var/log/openvpn/status.log",
     "service_name": "openvpn-server@server.service",
+    "tunnel_interface": "tun0",
+    "management_socket": "/run/openvpn-manager/openvpn.sock",
+    "ipp_path": "/var/lib/openvpn/server/ipp.txt",
+    "client_networks_path": "/etc/openvpn-manager/client-networks.json",
+    "firewall_env_path": "/etc/openvpn-manager/firewall.env",
+    "firewall_routes_path": "/etc/openvpn-manager/client-routes.conf",
+    "install_state_path": "/etc/openvpn-manager/install-state.json",
+    "update_request_path": "/var/lib/openvpn-manager/update-request.json",
+    "update_status_path": "/var/lib/openvpn-manager/update-status.json",
+    "update_service_name": "openvpn-manager-update.service",
     "web_group": web_group,
 }
 pathlib.Path(path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -489,15 +628,13 @@ chmod 0640 "$CONFIG_DIR/web.json"
 if systemctl is-active --quiet openvpn-manager-firewall.service 2>/dev/null; then
   systemctl stop openvpn-manager-firewall.service || true
 fi
-cat >"$CONFIG_DIR/firewall.env" <<EOF
-PUBLIC_INTERFACE=$(printf '%q' "$PUBLIC_INTERFACE")
-VPN_SUBNET=$(printf '%q' "$VPN_SUBNET")
-VPN_PORT=$(printf '%q' "$VPN_PORT")
-VPN_PROTOCOL=udp
-WEB_PORT=$(printf '%q' "$WEB_PORT")
-WEB_ALLOW=$(printf '%q' "$WEB_ALLOW")
-EOF
-chmod 0600 "$CONFIG_DIR/firewall.env"
+log "正在生成 OpenVPN、客户端路由和防火墙配置"
+python3 "$INSTALL_DIR/backend/agent.py" --direct sync_runtime >/dev/null || \
+  die "无法生成 OpenVPN 运行配置。"
+if [[ -n "$OLD_VPN_SUBNET" && "$OLD_VPN_SUBNET" != "$VPN_SUBNET" ]]; then
+  rm -f /var/lib/openvpn/server/ipp.txt
+  log "VPN 子网已变更，已清理旧客户端地址池记录"
+fi
 
 cat >/etc/sysctl.d/99-openvpn-manager.conf <<'EOF'
 net.ipv4.ip_forward = 1
@@ -533,9 +670,11 @@ nginx -t
 
 log "正在安装系统服务和命令行工具"
 install -m 0755 "$SCRIPT_DIR/scripts/openvpn-manager-firewall" /usr/local/sbin/openvpn-manager-firewall
+install -m 0755 "$SCRIPT_DIR/scripts/openvpn-manager-update" /usr/local/sbin/openvpn-manager-update
 install -m 0755 "$SCRIPT_DIR/scripts/openvpn-managerctl" /usr/local/bin/openvpn-managerctl
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-firewall.service" /etc/systemd/system/openvpn-manager-firewall.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-agent.service" /etc/systemd/system/openvpn-manager-agent.service
+install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-update.service" /etc/systemd/system/openvpn-manager-update.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-web-manager.service" /etc/systemd/system/openvpn-web-manager.service
 install -d -m 0755 /etc/systemd/system/openvpn-server@server.service.d
 install -m 0644 "$SCRIPT_DIR/config/openvpn-service-override.conf" \
@@ -576,7 +715,7 @@ chmod 0640 "$CONFIG_DIR/install-state.json"
 
 printf '\n\033[1;32m安装完成。\033[0m\n'
 printf '  管理地址：       https://%s:%s\n' "$ENDPOINT" "$WEB_PORT"
-printf '  OpenVPN：       %s:%s/udp\n' "$ENDPOINT" "$VPN_PORT"
+printf '  OpenVPN：       %s:%s/%s\n' "$ENDPOINT" "$VPN_PORT" "$VPN_PROTOCOL"
 printf '  首个客户端：     %s/clients/%s.ovpn\n' "$STATE_DIR" "$INITIAL_CLIENT"
 if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
   printf '  用户名：         %s\n' "$ADMIN_USER"

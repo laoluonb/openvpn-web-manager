@@ -4,7 +4,17 @@ import pathlib
 import tempfile
 import unittest
 
-from backend.agent import AgentError, parse_index, parse_status, render_profile, validate_client_name
+from backend.agent import (
+    AgentError,
+    normalize_client_network,
+    normalize_server_settings,
+    parse_index,
+    parse_status,
+    render_ccd_configs,
+    render_profile,
+    render_server_config,
+    validate_client_name,
+)
 
 
 class AgentParsingTests(unittest.TestCase):
@@ -80,6 +90,115 @@ class ProfileRenderingTests(unittest.TestCase):
             self.assertIn("verify-x509-name server name", profile)
             self.assertIn("<tls-crypt>", profile)
             self.assertEqual(profile.count("-----BEGIN CERTIFICATE-----"), 2)
+
+    def test_tcp_profile_uses_tcp_client_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            easy = root / "easy-rsa"
+            openvpn = root / "openvpn"
+            (easy / "pki" / "issued").mkdir(parents=True)
+            (easy / "pki" / "private").mkdir(parents=True)
+            openvpn.mkdir()
+            cert = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n"
+            key = "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----\n"
+            tls = "-----BEGIN OpenVPN Static key V1-----\nTEST\n-----END OpenVPN Static key V1-----\n"
+            (easy / "pki" / "ca.crt").write_text(cert, encoding="utf-8")
+            (easy / "pki" / "issued" / "router.crt").write_text(cert, encoding="utf-8")
+            (easy / "pki" / "private" / "router.key").write_text(key, encoding="utf-8")
+            (openvpn / "tls-crypt.key").write_text(tls, encoding="utf-8")
+            profile = render_profile(
+                {
+                    "easy_rsa_dir": str(easy),
+                    "openvpn_dir": str(openvpn),
+                    "endpoint": "vpn.example.com",
+                    "vpn_port": 443,
+                    "vpn_protocol": "tcp",
+                },
+                "router",
+            )
+            self.assertIn("proto tcp-client", profile)
+
+
+class ServerConfigurationTests(unittest.TestCase):
+    def test_server_settings_are_normalized_and_restricted(self) -> None:
+        current = {
+            "endpoint": "vpn.example.com",
+            "vpn_port": 1194,
+            "vpn_protocol": "udp",
+            "vpn_subnet": "10.8.0.0/24",
+        }
+        settings = normalize_server_settings(
+            current,
+            {
+                "endpoint": "edge.example.com",
+                "vpn_port": 443,
+                "vpn_protocol": "tcp",
+                "vpn_subnet": "10.20.0.7/24",
+                "dns_servers": ["1.1.1.1", "1.1.1.1", "9.9.9.9"],
+                "redirect_gateway": False,
+                "max_clients": 250,
+            },
+        )
+        self.assertEqual(settings["vpn_subnet"], "10.20.0.0/24")
+        self.assertEqual(settings["dns_servers"], ["1.1.1.1", "9.9.9.9"])
+        self.assertEqual(settings["vpn_protocol"], "tcp")
+        self.assertFalse(settings["redirect_gateway"])
+        with self.assertRaises(AgentError):
+            normalize_server_settings(current, {"vpn_subnet": "8.8.8.0/24"})
+        with self.assertRaises(AgentError):
+            normalize_server_settings({**current, "web_port": 8443}, {"vpn_port": 8443})
+
+    def test_client_network_rejects_overlap(self) -> None:
+        existing = {"branch-a": {"lan_subnet": "192.168.10.0/24", "share_lan": True}}
+        with self.assertRaises(AgentError):
+            normalize_client_network("10.8.0.0/24", True, "10.8.0.0/24", existing, "branch-b")
+        with self.assertRaises(AgentError):
+            normalize_client_network("192.168.10.128/25", False, "10.8.0.0/24", existing, "branch-b")
+        route = normalize_client_network("192.168.20.9/24", True, "10.8.0.0/24", existing, "branch-b")
+        self.assertEqual(route, {"lan_subnet": "192.168.20.0/24", "share_lan": True})
+
+    def test_server_config_renders_shared_and_private_client_lans(self) -> None:
+        config = {
+            "endpoint": "vpn.example.com",
+            "vpn_port": 1194,
+            "vpn_protocol": "udp",
+            "vpn_subnet": "10.8.0.0/24",
+            "dns_servers": ["1.1.1.1"],
+            "redirect_gateway": True,
+            "max_clients": 100,
+            "openvpn_dir": "/etc/openvpn/server",
+            "status_file": "/var/log/openvpn/status.log",
+            "management_socket": "/run/openvpn-manager/openvpn.sock",
+        }
+        rendered = render_server_config(
+            config,
+            {
+                "branch-a": {"lan_subnet": "192.168.10.0/24", "share_lan": True},
+                "branch-b": {"lan_subnet": "192.168.20.0/24", "share_lan": False},
+            },
+        )
+        self.assertIn("route 192.168.10.0 255.255.255.0", rendered)
+        self.assertNotIn('push "route 192.168.10.0 255.255.255.0"', rendered)
+        self.assertIn("route 192.168.20.0 255.255.255.0", rendered)
+        self.assertNotIn('push "route 192.168.20.0 255.255.255.0"', rendered)
+        self.assertIn("management /run/openvpn-manager/openvpn.sock unix", rendered)
+        self.assertIn("management-client-user root", rendered)
+        self.assertNotIn("client-to-client", rendered)
+
+    def test_ccd_pushes_shared_lan_only_to_other_clients(self) -> None:
+        rendered = render_ccd_configs(
+            {
+                "branch-a": {"lan_subnet": "192.168.10.0/24", "share_lan": True},
+                "branch-b": {"lan_subnet": "192.168.20.0/24", "share_lan": False},
+            },
+            ["branch-a", "branch-b", "phone"],
+        )
+        self.assertIn("iroute 192.168.10.0 255.255.255.0", rendered["branch-a"])
+        self.assertNotIn('push "route 192.168.10.0 255.255.255.0"', rendered["branch-a"])
+        self.assertIn('push "route 192.168.10.0 255.255.255.0"', rendered["branch-b"])
+        self.assertIn('push "route 192.168.10.0 255.255.255.0"', rendered["phone"])
+        self.assertIn("iroute 192.168.20.0 255.255.255.0", rendered["branch-b"])
+        self.assertNotIn('push "route 192.168.20.0 255.255.255.0"', rendered["phone"])
 
 
 if __name__ == "__main__":

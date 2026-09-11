@@ -25,5 +25,5 @@ jobs:
           node --check web/app.js
       - name: Shell checks
         run: |
-          bash -n install.sh uninstall.sh scripts/openvpn-manager-firewall
-          shellcheck install.sh uninstall.sh scripts/openvpn-manager-firewall
+          bash -n install.sh uninstall.sh scripts/openvpn-manager-firewall scripts/openvpn-manager-update
+          shellcheck install.sh uninstall.sh scripts/openvpn-manager-firewall scripts/openvpn-manager-update

@@ -177,6 +177,23 @@ class DemoAgent:
     def __init__(self):
         now = dt.datetime.now(dt.timezone.utc)
         self.lock = threading.Lock()
+        self.settings = {
+            "endpoint": "vpn.example.com",
+            "vpn_port": 1194,
+            "vpn_protocol": "udp",
+            "vpn_subnet": "10.8.0.0/24",
+            "dns_servers": ["1.1.1.1", "9.9.9.9"],
+            "redirect_gateway": True,
+            "max_clients": 100,
+            "web_port": 9090,
+            "web_allow": "127.0.0.1/32",
+        }
+        self.update_state = {
+            "state": "idle",
+            "message": "演示环境尚未执行在线更新",
+            "manager_version": "1.2.0-demo",
+            "openvpn_version": "OpenVPN 2.6 demo",
+        }
         self.clients = [
             {
                 "name": "ethan-laptop",
@@ -187,6 +204,8 @@ class DemoAgent:
                 "created_at": (now - dt.timedelta(days=18)).isoformat().replace("+00:00", "Z"),
                 "has_profile": True,
                 "online": True,
+                "lan_subnet": "192.168.50.0/24",
+                "share_lan": True,
                 "connection": {
                     "real_address": "203.0.113.42:52881",
                     "virtual_address": "10.8.0.2",
@@ -205,6 +224,8 @@ class DemoAgent:
                 "created_at": (now - dt.timedelta(days=4)).isoformat().replace("+00:00", "Z"),
                 "has_profile": True,
                 "online": False,
+                "lan_subnet": None,
+                "share_lan": False,
                 "connection": None,
             },
             {
@@ -216,6 +237,8 @@ class DemoAgent:
                 "created_at": None,
                 "has_profile": False,
                 "online": False,
+                "lan_subnet": None,
+                "share_lan": False,
                 "connection": None,
             },
         ]
@@ -227,11 +250,8 @@ class DemoAgent:
             "healthy": True,
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
-            "endpoint": "vpn.example.com",
-            "vpn_port": 1194,
-            "vpn_protocol": "udp",
-            "web_port": 9090,
-            "vpn_subnet": "10.8.0.0/24",
+            **self.settings,
+            "manager_version": "1.2.0-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -260,20 +280,89 @@ class DemoAgent:
                     "created_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
                     "has_profile": True,
                     "online": False,
+                    "lan_subnet": str(payload.get("lan_subnet") or "").strip() or None,
+                    "share_lan": bool(payload.get("lan_subnet")) and bool(payload.get("share_lan")),
                     "connection": None,
                 }
                 self.clients.append(item)
                 return item
+            if action == "set_client_network":
+                name = payload.get("name")
+                for item in self.clients:
+                    if item["name"] == name and item["status"] == "active":
+                        item["lan_subnet"] = str(payload.get("lan_subnet") or "").strip() or None
+                        item["share_lan"] = bool(item["lan_subnet"]) and bool(payload.get("share_lan"))
+                        return dict(item)
+                raise APIError("未找到有效客户端", 404)
+            if action == "disconnect_client":
+                name = payload.get("name")
+                for item in self.clients:
+                    if item["name"] == name and item["online"]:
+                        item.update(online=False, connection=None)
+                        return {"name": name, "disconnected": True, "sessions": 1}
+                raise APIError("客户端当前不在线", 409)
             if action == "revoke_client":
                 name = payload.get("name")
                 for item in self.clients:
                     if item["name"] == name and item["status"] == "active":
-                        item.update(status="revoked", revoked_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"), has_profile=False, online=False, connection=None)
+                        item.update(status="revoked", revoked_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"), has_profile=False, online=False, lan_subnet=None, share_lan=False, connection=None)
                         return {"name": name, "status": "revoked"}
                 raise APIError("未找到有效客户端", 404)
             if action == "get_profile":
                 name = payload.get("name", "client")
-                return {"name": name, "filename": f"{name}.ovpn", "content": f"# {name} 的演示配置\nclient\nremote vpn.example.com 1194\n"}
+                client_protocol = "udp" if self.settings["vpn_protocol"] == "udp" else "tcp-client"
+                content = f"""client
+dev tun
+proto {client_protocol}
+remote {self.settings['endpoint']} {self.settings['vpn_port']}
+remote-cert-tls server
+<ca>
+-----BEGIN CERTIFICATE-----
+DEMO-CA
+-----END CERTIFICATE-----
+</ca>
+<cert>
+-----BEGIN CERTIFICATE-----
+DEMO-CLIENT
+-----END CERTIFICATE-----
+</cert>
+<key>
+-----BEGIN PRIVATE KEY-----
+DEMO-PRIVATE-KEY
+-----END PRIVATE KEY-----
+</key>
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+DEMO-TLS-CRYPT
+-----END OpenVPN Static key V1-----
+</tls-crypt>
+"""
+                return {
+                    "name": name,
+                    "filename": f"{name}.ovpn",
+                    "content": content,
+                    "ikuai": {
+                        "dial_name": name,
+                        "server": self.settings["endpoint"],
+                        "port": self.settings["vpn_port"],
+                        "protocol": self.settings["vpn_protocol"].upper(),
+                        "authentication": "静态密钥（tls-crypt）",
+                        "ca_certificate": "-----BEGIN CERTIFICATE-----\nDEMO-CA\n-----END CERTIFICATE-----\n",
+                        "client_certificate": "-----BEGIN CERTIFICATE-----\nDEMO-CLIENT\n-----END CERTIFICATE-----\n",
+                        "private_key": "-----BEGIN PRIVATE KEY-----\nDEMO-PRIVATE-KEY\n-----END PRIVATE KEY-----\n",
+                        "tls_crypt_key": "-----BEGIN OpenVPN Static key V1-----\nDEMO-TLS-CRYPT\n-----END OpenVPN Static key V1-----\n",
+                    },
+                }
+            if action == "server_settings":
+                return dict(self.settings)
+            if action == "update_server_settings":
+                requested = payload.get("settings")
+                if not isinstance(requested, dict):
+                    raise APIError("服务端设置无效")
+                for key in ("endpoint", "vpn_port", "vpn_protocol", "vpn_subnet", "dns_servers", "redirect_gateway", "max_clients"):
+                    if key in requested:
+                        self.settings[key] = requested[key]
+                return {"settings": dict(self.settings), "status": self._status()}
             if action == "restart":
                 return self._status()
             if action == "logs":
@@ -291,6 +380,17 @@ class DemoAgent:
                 }
             if action == "set_web_password":
                 return {"changed": True}
+            if action == "update_status":
+                return dict(self.update_state)
+            if action == "start_update":
+                self.update_state = {
+                    "state": "completed",
+                    "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
+                    "manager_version": "1.2.0-demo",
+                    "openvpn_version": "OpenVPN 2.6 demo",
+                    "target_version": "v1.2.0-demo",
+                }
+                return dict(self.update_state)
             raise APIError("不支持此演示操作")
 
 
@@ -334,7 +434,7 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "OpenVPNWebManager/1.0"
+    server_version = "OpenVPNWebManager/1.2"
     context: AppContext
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -470,11 +570,22 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
                 lines = 120
             self._send_json(200, self.context.agent.request({"action": "logs", "lines": lines}))
             return
+        if path == "/api/server/settings":
+            self._require_session()
+            self._send_json(200, self.context.agent.request({"action": "server_settings"}))
+            return
+        if path == "/api/update":
+            self._require_session()
+            self._send_json(200, self.context.agent.request({"action": "update_status"}))
+            return
         profile_match = re.fullmatch(r"/api/clients/([^/]+)/profile", path)
         if profile_match:
             self._require_session()
             name = self._route_name(profile_match.group(1))
             profile = self.context.agent.request({"action": "get_profile", "name": name})
+            if query.get("format", [""])[0] == "json":
+                self._send_json(200, profile)
+                return
             body = profile["content"].encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/x-openvpn-profile")
@@ -504,7 +615,14 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self._require_session(csrf=True)
             payload = self._read_json()
             name = self._route_name(str(payload.get("name", "")))
-            result = self.context.agent.request({"action": "create_client", "name": name})
+            result = self.context.agent.request(
+                {
+                    "action": "create_client",
+                    "name": name,
+                    "lan_subnet": payload.get("lan_subnet", ""),
+                    "share_lan": payload.get("share_lan", False),
+                }
+            )
             LOGGER.info("client profile created: %s", name)
             self._send_json(201, result)
             return
@@ -512,6 +630,44 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self._require_session(csrf=True)
             LOGGER.warning("OpenVPN restart requested by dashboard user")
             self._send_json(200, self.context.agent.request({"action": "restart"}))
+            return
+        if path == "/api/server/settings":
+            self._require_session(csrf=True)
+            payload = self._read_json()
+            LOGGER.warning("OpenVPN server settings update requested by dashboard user")
+            result = self.context.agent.request(
+                {"action": "update_server_settings", "settings": payload}
+            )
+            self._send_json(200, result)
+            return
+        disconnect_match = re.fullmatch(r"/api/clients/([^/]+)/disconnect", path)
+        if disconnect_match:
+            self._require_session(csrf=True)
+            name = self._route_name(disconnect_match.group(1))
+            result = self.context.agent.request({"action": "disconnect_client", "name": name})
+            LOGGER.warning("client disconnected: %s", name)
+            self._send_json(200, result)
+            return
+        network_match = re.fullmatch(r"/api/clients/([^/]+)/network", path)
+        if network_match:
+            self._require_session(csrf=True)
+            name = self._route_name(network_match.group(1))
+            payload = self._read_json()
+            result = self.context.agent.request(
+                {
+                    "action": "set_client_network",
+                    "name": name,
+                    "lan_subnet": payload.get("lan_subnet", ""),
+                    "share_lan": payload.get("share_lan", False),
+                }
+            )
+            LOGGER.warning("client network settings changed: %s", name)
+            self._send_json(200, result)
+            return
+        if path == "/api/update":
+            self._require_session(csrf=True)
+            LOGGER.warning("manager and OpenVPN update requested by dashboard user")
+            self._send_json(202, self.context.agent.request({"action": "start_update"}))
             return
         if path == "/api/password":
             self._require_session(csrf=True)

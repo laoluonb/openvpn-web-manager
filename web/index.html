@@ -30,6 +30,12 @@
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="m8 12 8 8M16 12l-8 8M9 7V3M15 7V3M7 7h10v3a5 5 0 0 1-10 0V7ZM12 15v6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.37.25.58.66.6 1.1v3.8a1.7 1.7 0 0 0-.6 1.1Z"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h3a3 3 0 0 0 3-3V8a3 3 0 0 1 3-3h-1M8 5h3M6 3v4"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M16 16l-4 4-4-4M12 12v8M20.4 17.5A5 5 0 0 0 18 8.2 7 7 0 0 0 4.3 10.5 4.5 4.5 0 0 0 5 19h2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
   </svg>
 
   <section id="loginView" class="auth-shell">
@@ -72,9 +78,10 @@
         <span class="brand-mark"><svg><use href="#i-shield"></use></svg></span>
         <div><strong>OpenVPN</strong><span>管理中心</span></div>
       </div>
-      <nav class="main-nav" aria-label="Primary navigation">
+      <nav class="main-nav" aria-label="主导航">
         <button class="nav-item active" data-view="overview" type="button"><svg><use href="#i-grid"></use></svg><span>概览</span></button>
         <button class="nav-item" data-view="clients" type="button"><svg><use href="#i-users"></use></svg><span>客户端</span><span id="clientNavCount" class="nav-count">0</span></button>
+        <button class="nav-item" data-view="server" type="button"><svg><use href="#i-settings"></use></svg><span>服务端</span></button>
         <button class="nav-item" data-view="system" type="button"><svg><use href="#i-terminal"></use></svg><span>系统</span></button>
       </nav>
       <div class="sidebar-security">
@@ -157,15 +164,54 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>客户端</th><th>状态</th><th>VPN 地址</th><th>流量</th><th>到期时间</th><th class="actions-column">操作</th></tr></thead>
-              <tbody id="clientTableBody"><tr><td colspan="6"><div class="empty-state">正在加载客户端清单…</div></td></tr></tbody>
+              <thead><tr><th>客户端</th><th>状态</th><th>下级内网</th><th>VPN 地址</th><th>流量</th><th>到期时间</th><th class="actions-column">操作</th></tr></thead>
+              <tbody id="clientTableBody"><tr><td colspan="7"><div class="empty-state">正在加载客户端清单…</div></td></tr></tbody>
             </table>
           </div>
         </article>
       </section>
 
+      <section id="serverPanel" class="view-panel hidden">
+        <div class="server-settings-grid">
+          <article class="panel-card settings-card">
+            <div class="panel-heading settings-heading">
+              <div><p class="eyebrow">OpenVPN Server</p><h3>服务端设置</h3><p>修改公网入口、协议、地址池和推送策略。保存后会重新生成全部有效客户端配置并重启 OpenVPN。</p></div>
+              <div class="metric-icon metric-indigo"><svg><use href="#i-settings"></use></svg></div>
+            </div>
+            <form id="serverSettingsForm" class="settings-form">
+              <div class="form-grid">
+                <label><span>公网地址或域名</span><input id="serverEndpoint" name="endpoint" placeholder="vpn.example.com" required><small>将写入所有客户端配置的 remote 指令。</small></label>
+                <label><span>VPN 端口</span><input id="serverVpnPort" name="vpn_port" type="number" min="1" max="65535" required></label>
+                <label><span>传输协议</span><select id="serverProtocol" name="vpn_protocol"><option value="udp">UDP（推荐）</option><option value="tcp">TCP</option></select></label>
+                <label><span>VPN 私有子网</span><input id="serverSubnet" name="vpn_subnet" placeholder="10.8.0.0/24" required><small>仅允许 RFC1918 私有网段，且不能与客户端下级内网重叠。</small></label>
+                <label><span>首选 DNS</span><input id="serverDns1" name="dns1" placeholder="1.1.1.1"></label>
+                <label><span>备用 DNS</span><input id="serverDns2" name="dns2" placeholder="9.9.9.9"></label>
+                <label><span>最大并发客户端</span><input id="serverMaxClients" name="max_clients" type="number" min="1" max="1000" required></label>
+                <div class="readonly-field"><span>管理控制台端口</span><strong id="serverWebPort">—</strong><small>为避免意外锁定控制台，Web 端口仍通过安装脚本修改。</small></div>
+              </div>
+              <label class="switch-field"><input id="serverRedirectGateway" type="checkbox"><span class="switch-control"></span><span><strong>让客户端全部流量经过 VPN</strong><small>关闭后只下发 VPN 和已共享的下级内网路由。</small></span></label>
+              <div class="settings-warning"><svg><use href="#i-activity"></use></svg><span>应用设置会短暂断开当前 VPN 会话；若通过 VPN 访问此页面，请提前确认新的连接参数。</span></div>
+              <p id="serverFormError" class="form-error" role="alert"></p>
+              <div class="form-actions"><button id="saveServerButton" class="button button-primary" type="submit"><svg><use href="#i-save"></use></svg><span>保存并应用</span></button></div>
+            </form>
+          </article>
+          <aside class="panel-card route-guide-card">
+            <div class="route-guide-icon"><svg><use href="#i-route"></use></svg></div>
+            <p class="eyebrow">站点互联</p>
+            <h3>客户端下级内网</h3>
+            <p>可为爱快、软路由或分支网关填写其 LAN 网段。服务端会生成 <code>iroute</code> 与系统路由。</p>
+            <ul>
+              <li><strong>仅服务端可访问：</strong>其他 VPN 客户端会被防火墙阻止。</li>
+              <li><strong>允许其他客户端访问：</strong>向其他客户端推送该网段路由，并放行访问及响应流量。</li>
+              <li>分支路由器仍需允许 OpenVPN 到 LAN 的转发，且各网段不能重叠。</li>
+            </ul>
+            <button class="button button-secondary button-wide" data-jump="clients" type="button"><svg><use href="#i-users"></use></svg><span>配置客户端内网</span></button>
+          </aside>
+        </div>
+      </section>
+
       <section id="systemPanel" class="view-panel hidden">
-        <div class="system-grid">
+        <div class="system-grid maintenance-grid">
           <article class="panel-card config-card">
             <div class="panel-heading"><div><p class="eyebrow">配置</p><h3>服务器详情</h3></div><div class="metric-icon metric-indigo"><svg><use href="#i-server"></use></svg></div></div>
             <dl class="config-list">
@@ -176,6 +222,16 @@
               <div><dt>服务状态</dt><dd id="configState">—</dd></div>
             </dl>
             <div class="info-callout"><svg><use href="#i-shield"></use></svg><p><strong>安全提示</strong><span>请限制管理端口的来源，并离线备份 CA 私钥。</span></p></div>
+          </article>
+          <article class="panel-card update-card">
+            <div class="panel-heading"><div><p class="eyebrow">在线维护</p><h3>一键更新</h3></div><div class="metric-icon metric-cyan"><svg><use href="#i-cloud"></use></svg></div></div>
+            <p class="update-copy">从本项目 GitHub 最新稳定版本更新整个管理面板，同时通过系统软件源升级 OpenVPN。执行前会自动备份现有配置，并为 OpenVPN 重新随机端口。</p>
+            <dl class="update-versions">
+              <div><dt>管理面板</dt><dd id="managerVersion">—</dd></div>
+              <div><dt>OpenVPN</dt><dd id="updateOpenvpnVersion">—</dd></div>
+            </dl>
+            <div id="updateStatusBox" class="update-status"><i></i><div><strong id="updateStatusTitle">等待检查</strong><span id="updateStatusMessage">打开系统页面后将读取更新状态。</span></div></div>
+            <button id="updateButton" class="button button-primary button-wide" type="button"><svg><use href="#i-cloud"></use></svg><span>更新面板与 OpenVPN</span></button>
           </article>
           <article class="panel-card log-card">
             <div class="panel-heading"><div><p class="eyebrow">journalctl</p><h3>最近服务日志</h3></div><button id="loadLogsButton" class="button button-secondary" type="button"><svg><use href="#i-refresh"></use></svg><span>重新加载</span></button></div>
@@ -194,15 +250,62 @@
       <button class="modal-close" data-close-dialog="clientDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
       <p class="eyebrow">新凭据</p>
       <h2>创建客户端配置</h2>
-      <p>请输入简短的人员或设备名称。它将成为证书身份，吊销后不能重复使用。</p>
+      <p>请输入人员或设备名称。爱快、软路由等分支网关还可以同时声明其下级 LAN 网段。</p>
       <label><span>客户端名称</span><input id="clientName" name="name" placeholder="例如 ethan-phone" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,31}" autocomplete="off" required><small>仅支持英文字母、数字、连字符和下划线。</small></label>
+      <label><span>客户端下级内网（可选）</span><input id="clientLanSubnet" name="lan_subnet" placeholder="例如 192.168.50.0/24" autocomplete="off"><small>适用于爱快或分支路由器；普通电脑、手机请留空。</small></label>
+      <label id="clientShareField" class="switch-field compact"><input id="clientShareLan" type="checkbox"><span class="switch-control"></span><span><strong>允许其他 VPN 客户端访问该内网</strong><small>关闭时只有服务端可以访问此客户端后的 LAN。</small></span></label>
       <p id="clientFormError" class="form-error" role="alert"></p>
       <div class="modal-actions"><button class="button button-ghost" data-close-dialog="clientDialog" type="button">取消</button><button id="createClientButton" class="button button-primary" type="submit"><svg><use href="#i-plus"></use></svg><span>创建配置</span></button></div>
     </form>
   </dialog>
 
+  <dialog id="profileDialog" class="modal modal-wide">
+    <div class="profile-dialog-content">
+      <button class="modal-close" data-close-dialog="profileDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
+      <div class="profile-heading"><div class="modal-icon"><svg><use href="#i-eye"></use></svg></div><div><p class="eyebrow">配置查看器</p><h2 id="profileTitle">客户端配置</h2><p>页面包含客户端私钥，请仅在可信管理设备上查看和复制。</p></div></div>
+      <section class="ikuai-card">
+        <div class="panel-heading"><div><p class="eyebrow">iKuai 快速填写</p><h3>爱快 OpenVPN 参数</h3></div><span class="badge success">tls-crypt</span></div>
+        <div class="ikuai-grid">
+          <button class="copy-value" data-profile-field="dial_name" type="button"><span>拨号名称</span><strong id="ikuaiDialName">—</strong><svg><use href="#i-copy"></use></svg></button>
+          <button class="copy-value" data-profile-field="server" type="button"><span>服务器地址/域名</span><strong id="ikuaiServer">—</strong><svg><use href="#i-copy"></use></svg></button>
+          <button class="copy-value" data-profile-field="port" type="button"><span>服务端口</span><strong id="ikuaiPort">—</strong><svg><use href="#i-copy"></use></svg></button>
+          <button class="copy-value" data-profile-field="protocol" type="button"><span>隧道协议</span><strong id="ikuaiProtocol">—</strong><svg><use href="#i-copy"></use></svg></button>
+          <button class="copy-value span-two" data-profile-field="authentication" type="button"><span>认证方式</span><strong id="ikuaiAuthentication">—</strong><svg><use href="#i-copy"></use></svg></button>
+        </div>
+        <p class="ikuai-tip">爱快版本的字段可能略有差异；认证方式请选择“静态密钥（tls-crypt）”。下方已将证书和密钥拆分，可逐项复制粘贴。</p>
+        <details class="ikuai-materials">
+          <summary><span>爱快证书与密钥</span><small>展开后逐项复制 CA、客户端证书、私钥和 tls-crypt 密钥</small></summary>
+          <div class="ikuai-material-grid">
+            <article><header><strong>CA 证书</strong><button data-profile-field="ca_certificate" type="button"><svg><use href="#i-copy"></use></svg>复制</button></header><pre id="ikuaiCaCertificate">—</pre></article>
+            <article><header><strong>客户端证书</strong><button data-profile-field="client_certificate" type="button"><svg><use href="#i-copy"></use></svg>复制</button></header><pre id="ikuaiClientCertificate">—</pre></article>
+            <article><header><strong>客户端私钥</strong><button data-profile-field="private_key" type="button"><svg><use href="#i-copy"></use></svg>复制</button></header><pre id="ikuaiPrivateKey">—</pre></article>
+            <article><header><strong>tls-crypt 静态密钥</strong><button data-profile-field="tls_crypt_key" type="button"><svg><use href="#i-copy"></use></svg>复制</button></header><pre id="ikuaiTlsCryptKey">—</pre></article>
+          </div>
+        </details>
+      </section>
+      <div class="profile-toolbar"><div><strong>完整 .ovpn 配置</strong><span id="profileFilename">client.ovpn</span></div><div><button id="copyProfileButton" class="button button-secondary" type="button"><svg><use href="#i-copy"></use></svg><span>复制全文</span></button><button id="downloadProfileButton" class="button button-primary" type="button"><svg><use href="#i-download"></use></svg><span>下载</span></button></div></div>
+      <pre id="profileContent" class="profile-code" tabindex="0">正在读取配置…</pre>
+    </div>
+  </dialog>
+
+  <dialog id="networkDialog" class="modal">
+    <form id="networkForm" method="dialog">
+      <div class="modal-icon"><svg><use href="#i-route"></use></svg></div>
+      <button class="modal-close" data-close-dialog="networkDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
+      <p class="eyebrow">站点互联</p>
+      <h2 id="networkDialogTitle">配置客户端内网</h2>
+      <p>填写该客户端后方的 LAN 网段。保存会更新服务端路由、防火墙并短暂重启 OpenVPN。</p>
+      <input id="networkClientName" type="hidden">
+      <label><span>客户端下级内网</span><input id="networkLanSubnet" placeholder="例如 192.168.50.0/24" autocomplete="off"><small>留空并保存可移除现有下级内网配置。</small></label>
+      <label id="networkShareField" class="switch-field compact"><input id="networkShareLan" type="checkbox"><span class="switch-control"></span><span><strong>允许其他 VPN 客户端访问</strong><small>开启后只向其他客户端推送路由，并放行访问与响应流量；不会把该路由推回当前客户端。</small></span></label>
+      <p id="networkFormError" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button class="button button-ghost" data-close-dialog="networkDialog" type="button">取消</button><button id="saveNetworkButton" class="button button-primary" type="submit"><svg><use href="#i-save"></use></svg><span>保存路由</span></button></div>
+    </form>
+  </dialog>
+
   <dialog id="passwordDialog" class="modal">
     <form id="passwordForm" method="dialog">
+      <input id="passwordUsername" class="visually-hidden" type="text" autocomplete="username" tabindex="-1" aria-hidden="true">
       <div class="modal-icon"><svg><use href="#i-lock"></use></svg></div>
       <button class="modal-close" data-close-dialog="passwordDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
       <p class="eyebrow">账户安全</p>

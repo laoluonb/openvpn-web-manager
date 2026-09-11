@@ -48,6 +48,7 @@ install -d -m 0700 "$BACKUP_DIR"
   tar -C /etc/openvpn/server/easy-rsa -czf "$BACKUP_DIR/pki.tar.gz" pki
 
 systemctl disable --now openvpn-web-manager.service openvpn-manager-agent.service 2>/dev/null || true
+systemctl stop openvpn-manager-update.service 2>/dev/null || true
 systemctl disable --now openvpn-server@server.service 2>/dev/null || true
 systemctl disable --now openvpn-manager-firewall.service 2>/dev/null || true
 /usr/local/sbin/openvpn-manager-firewall stop 2>/dev/null || true
@@ -60,9 +61,11 @@ fi
 rm -f \
   /etc/systemd/system/openvpn-web-manager.service \
   /etc/systemd/system/openvpn-manager-agent.service \
+  /etc/systemd/system/openvpn-manager-update.service \
   /etc/systemd/system/openvpn-manager-firewall.service \
   /etc/systemd/system/openvpn-server@server.service.d/openvpn-manager.conf \
   /usr/local/sbin/openvpn-manager-firewall \
+  /usr/local/sbin/openvpn-manager-update \
   /usr/local/bin/openvpn-managerctl \
   /etc/sysctl.d/99-openvpn-manager.conf
 rm -rf /opt/openvpn-web-manager

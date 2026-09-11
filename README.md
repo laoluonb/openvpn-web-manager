@@ -1,49 +1,51 @@
 # OpenVPN 管理中心
 
-一个轻量、现代、无第三方运行时依赖的 OpenVPN Web 控制台。执行一次安装脚本，即可完成
-PKI、OpenVPN 服务、路由转发、防火墙、HTTPS 反向代理、首个客户端配置和中文管理界面的初始化。
+一个轻量、现代、全中文的 OpenVPN Web 管理面板。执行一次安装脚本，即可完成 Easy-RSA PKI、
+OpenVPN 服务端、路由转发、防火墙、HTTPS 反向代理、首个客户端和管理控制台初始化。
 
 ![OpenVPN 中文管理控制台](docs/dashboard.png)
 
 ## 主要特性
 
-- **一键安装**：支持 Debian 12/13、Ubuntu 22.04/24.04 及更新版本
-- **全中文现代界面**：响应式布局、深浅色主题，无前端框架和 CDN 依赖
-- **轻量运行**：后端只使用 Python 标准库
-- **权限隔离**：Web 服务以普通用户运行，PKI 操作由受限 Unix 套接字后的 root 代理完成
-- **客户端全生命周期**：签发、下载、在线状态查看和吊销 `.ovpn` 配置
-- **运行维护**：查看服务健康度、在线会话、最近日志，并可安全重启 OpenVPN
-- **安全默认值**：TLS、`tls-crypt`、scrypt 密码哈希、安全 Cookie、CSRF 校验、登录限速、
-  严格名称校验和 systemd 服务加固
-- **可重复执行与回滚**：重新安装会保留 CA，并自动创建仅 root 可读的时间戳备份
+- **一键安装**：支持 Debian 12/13、Ubuntu 22.04/24.04 及更新版本；每次安装、升级或修复默认重新随机 VPN 端口。
+- **安全升级/修复**：重复执行安装器时自动备份并保留 CA、客户端、密码和除 VPN 端口外未显式覆盖的服务端参数。
+- **服务端可视化配置**：在 Web 页面修改公网地址、端口、UDP/TCP、VPN 子网、DNS、全流量转发和最大连接数。
+- **客户端全生命周期**：创建、查看、复制、下载、踢出在线连接和吊销 `.ovpn` 配置。
+- **爱快 iKuai 友好**：点击客户端名称即可查看完整配置，并逐项复制 CA、客户端证书、私钥和 `tls-crypt` 密钥。
+- **客户端下级内网**：为爱快、软路由或分支网关配置 LAN CIDR，可选择仅服务端访问或允许其他 VPN 客户端访问。
+- **一键在线更新**：从本项目 GitHub 最新稳定 Release 更新面板，并通过系统软件源升级 OpenVPN。
+- **全中文现代界面**：响应式布局、深浅色主题，无前端框架和 CDN 依赖。
+- **轻量运行**：后端仅使用 Python 标准库。
+- **权限隔离**：Web 服务以普通用户运行，PKI 和系统操作由受限 Unix 套接字后的 root 代理执行。
 
 ## 架构
 
 ```text
-浏览器 --HTTPS--> nginx --HTTP/本机回环--> Web 服务（openvpn-web）
-                                              |
-                                              | Unix 套接字，权限 0660
-                                              v
-                                       root 控制代理
-                                              |
-                                Easy-RSA / systemd / OpenVPN
+浏览器 --HTTPS--> nginx --HTTP/127.0.0.1--> Web 服务（openvpn-web）
+                                                    |
+                                                    | Unix 套接字 0660
+                                                    v
+                                             root 控制代理
+                                                    |
+                           Easy-RSA / systemd / OpenVPN / iptables
 ```
 
-浏览器不会直接连接特权进程。root 代理只接受少量固定 JSON 指令，并对每个客户端名称进行严格校验。
+OpenVPN 还会创建仅 root 可连接的本地管理套接字，用于踢出指定客户端的当前在线会话。浏览器不会
+直接连接任何特权进程。
 
 ## 环境要求
 
-- 使用 systemd 的 Debian/Ubuntu 服务器
-- root 或 `sudo` 权限
-- 指向服务器的公网 IPv4 地址或域名
-- 放行 UDP `1194` 和 TCP `8443`（均可自定义）
+- 使用 systemd 的 Debian/Ubuntu 服务器；
+- root 或 `sudo` 权限；
+- 公网 IPv4 地址或指向服务器的域名；
+- 放行安装器最终输出的随机 OpenVPN 端口和默认 TCP `8443` 管理端口，或放行自定义端口。
 
-安装器当前适配 Debian/Ubuntu 的软件包目录结构：
-`/etc/openvpn/server` 与 `openvpn-server@server.service`。
+安装器使用 Debian/Ubuntu 的 `/etc/openvpn/server` 目录和
+`openvpn-server@server.service` 服务单元。
 
-## 安装
+## 一键安装
 
-建议先查看脚本内容，然后执行：
+建议先查看脚本，再执行：
 
 ```bash
 git clone https://github.com/laoluonb/openvpn-web-manager.git
@@ -51,13 +53,18 @@ cd openvpn-web-manager
 sudo ./install.sh --endpoint vpn.example.com
 ```
 
-如果服务器直接使用公网 IP，可以省略 `--endpoint`，安装器会自动探测公网 IPv4 地址。
+服务器直接使用公网 IP 时可省略 `--endpoint`，安装器会自动探测公网 IPv4 地址。
 
 ### 安装参数
 
 ```text
 --endpoint HOST          公网 IPv4 地址或域名
---vpn-port PORT          OpenVPN UDP 端口，默认 1194
+--vpn-port PORT          OpenVPN 端口，每次安装默认随机选择 10000-29999；可指定固定端口
+--vpn-protocol PROTO     OpenVPN 协议：udp 或 tcp，默认 udp
+--vpn-subnet CIDR        VPN 私有子网，默认 10.8.0.0/24
+--dns-servers LIST       推送的 DNS，逗号分隔，默认 1.1.1.1,9.9.9.9
+--redirect-gateway MODE  是否让客户端全部流量经过 VPN：yes 或 no
+--max-clients COUNT      最大并发客户端数，默认 100
 --web-port PORT          HTTPS 管理端口，默认 8443
 --web-allow CIDR         允许访问控制台的来源，默认 0.0.0.0/0
 --admin-user USER        控制台用户名，默认 admin
@@ -68,78 +75,169 @@ sudo ./install.sh --endpoint vpn.example.com
 --existing-action MODE   已有 OpenVPN 的处理方式：preserve、remove 或 abort
 ```
 
-### 已有 OpenVPN 的处理
-
-安装器会在安装软件包前检测现有 OpenVPN：
-
-- **本项目的已有安装**：自动备份并保留 CA、客户端证书、控制台账号和配置，然后执行升级或修复。
-- **其他来源的 OpenVPN 配置**：交互安装时显示选择菜单；非交互安装默认先完整备份，再替换安装。
-- **只安装了软件包但尚未配置**：复用现有软件包并继续初始化。
-
-可在自动化环境中明确指定行为：
-
-```bash
-# 备份原配置后替换安装（推荐）
-sudo ./install.sh --existing-action preserve --endpoint vpn.example.com
-
-# 删除原配置和软件包后全新安装
-sudo ./install.sh --existing-action remove --endpoint vpn.example.com
-
-# 只检测；发现已有 OpenVPN 就退出
-sudo ./install.sh --existing-action abort --endpoint vpn.example.com
-```
-
-`preserve` 生成的完整归档位于 `/var/backups/openvpn-web-manager/时间戳/`。其中包含原
-OpenVPN 配置、PKI、状态目录和相关 systemd 自定义单元。`remove` 是破坏性操作，不会为原配置创建备份。
-
-仅允许指定办公网段访问控制台：
+示例：使用 TCP 443、关闭全流量转发，并仅允许办公网段访问控制台：
 
 ```bash
 sudo ./install.sh \
   --endpoint vpn.example.com \
+  --vpn-port 443 \
+  --vpn-protocol tcp \
+  --redirect-gateway no \
   --web-allow 203.0.113.0/24 \
-  --initial-client ethan-laptop
+  --initial-client branch-office
 ```
 
-安装完成后会显示：
+### 已有 OpenVPN 的处理
 
-- 中文管理控制台地址；
-- 自动生成的控制台密码（仅首次安装或重置时显示）；
-- 首个 `.ovpn` 配置文件路径；
-- 仅 root 可读的凭据文件路径；
-- 检测到旧配置时生成的备份路径。
+- **本项目已有安装**：自动选择 `preserve`，备份后保留 CA、客户端证书、控制台账号、TLS 文件、
+  客户端内网策略以及除 VPN 端口外的当前服务端参数，再执行升级或修复；VPN 端口默认重新随机。
+- **其他来源的 OpenVPN 配置**：交互终端会询问备份替换、彻底删除或退出；非交互环境默认先备份再替换。
+- **仅安装软件包但没有配置**：复用软件包并继续初始化。
 
-## 日常使用
+```bash
+# 保留本项目当前参数并升级/修复；VPN 端口会重新随机
+sudo ./install.sh --existing-action preserve
 
-访问 `https://服务器地址:8443`。如果未传入受信任证书，首次访问需要确认自签名证书警告。
+# 在保留其他参数的同时修改 VPN 端口
+sudo ./install.sh --existing-action preserve --vpn-port 443 --vpn-protocol tcp
 
-本机命令行工具与 Web 控制台使用同一个控制代理：
+# 删除原配置后全新安装（不可恢复）
+sudo ./install.sh --existing-action remove --endpoint vpn.example.com
+
+# 检测到已有 OpenVPN 时退出
+sudo ./install.sh --existing-action abort
+```
+
+`preserve` 备份位于 `/var/backups/openvpn-web-manager/时间戳/`，包含 OpenVPN 配置、PKI、状态目录
+和相关 systemd 自定义单元。
+
+安装器每次运行都会在 `10000-29999` 中重新选择可用的随机 OpenVPN 端口，并避免继续使用上一次
+端口；只有显式传入 `--vpn-port PORT` 时才使用固定端口。端口变化后，旧客户端文件中的连接端口
+不再可用；请按终端输出在云安全组和上游防火墙中放行新端口，并从管理面板重新下载全部客户端配置。
+
+## Web 管理功能
+
+访问 `https://服务器地址:8443`。未提供受信任证书时，首次访问需要确认自签名证书警告。
+
+![客户端管理、下级内网与连接操作](docs/client-management.png)
+
+### 修改 OpenVPN 服务端
+
+进入“服务端”页面，可修改：
+
+- 公网地址或域名；
+- VPN 端口与 UDP/TCP；
+- VPN 私有地址池；
+- 推送给客户端的 DNS；
+- 是否将客户端全部流量转发到 VPN；
+- 最大并发客户端数。
+
+保存后会验证网段冲突、重新生成 `server.conf` 和全部有效客户端配置、同步防火墙，并重启
+OpenVPN。VPN 子网变化时会清理旧地址池记录，避免客户端继续取得旧网段地址。
+
+![OpenVPN 服务端设置](docs/server-settings.png)
+
+### 查看配置与爱快 iKuai
+
+在“客户端”页面点击客户端名称或“查看”图标，即可打开配置查看器：
+
+1. 显示拨号名称、服务器地址、端口、UDP/TCP 和认证方式；
+2. 显示完整 `.ovpn` 内容，可一键复制或下载；
+3. 单独显示 CA 证书、客户端证书、客户端私钥和 `tls-crypt` 静态密钥，可逐项复制。
+
+在爱快添加 OpenVPN 时，认证方式选择 **静态密钥（tls-crypt）**，再复制页面显示的对应参数。
+不同爱快版本的字段名称可能略有差异。配置页面包含客户端私钥，只应在可信管理设备上打开。
+
+![爱快 iKuai 配置查看器](docs/ikuai-profile.png)
+
+### 踢出与吊销
+
+- **踢出连接**：立即断开该客户端当前在线会话，不删除证书；客户端仍可使用原配置重新连接。
+- **吊销配置**：撤销证书并更新 CRL，原配置将永久失效；同名证书不能直接重新创建。
+
+### 客户端下级内网
+
+创建客户端或编辑已有客户端时，可填写该设备后方的 LAN，例如 `192.168.50.0/24`，并选择：
+
+- **仅服务端可访问**：服务端生成 `route` 和该客户端的 `iroute`；不向其他客户端下发路由，
+  防火墙同时阻止其他 VPN 客户端手工添加路由后访问。
+- **允许其他 VPN 客户端访问**：只向其余有效客户端下发该 LAN 路由，不会把路由推回 LAN 所属
+  客户端；防火墙允许其他客户端的访问流量和对应响应流量。
+
+部署前请确认：
+
+- VPN 子网和所有分支 LAN 均为 RFC1918 IPv4 私有网段，且彼此不能重叠；
+- 爱快或分支路由器已允许 OpenVPN 隧道到 LAN 的转发；
+- LAN 主机的返回流量经过该爱快或分支路由器；
+- 上游安全组已放行实际使用的 OpenVPN 端口。
+
+## 一键在线更新
+
+进入“系统”页面，点击“更新面板与 OpenVPN”。更新任务会：
+
+1. 读取 `laoluonb/openvpn-web-manager` 最新稳定 Release；
+2. 下载并安全检查 GitHub 自动生成的源码包；
+3. 备份现有 OpenVPN、CA、客户端和管理配置；
+4. 保留除 VPN 端口外的当前服务端参数，重新随机端口并运行最新版安装器；
+5. 通过系统软件源安装可用的最新版 OpenVPN；
+6. 在页面显示排队、运行、完成或失败状态。
+
+更新会更换 VPN 端口。完成后必须放行新端口并重新下载客户端配置；更新期间管理页面和 VPN 连接
+可能短暂中断。失败时可查看：
+
+```bash
+journalctl -u openvpn-manager-update.service -n 200 --no-pager
+```
+
+## 命令行管理
+
+本机 CLI 与 Web 控制台使用同一个权限隔离代理：
 
 ```bash
 sudo openvpn-managerctl status
 sudo openvpn-managerctl list
+
+# 普通客户端
 sudo openvpn-managerctl create alice-phone
-sudo openvpn-managerctl revoke alice-phone
+
+# 分支客户端：仅服务端可访问其 LAN
+sudo openvpn-managerctl create branch-a --lan-subnet 192.168.50.0/24
+
+# 修改为允许其他 VPN 客户端访问
+sudo openvpn-managerctl network branch-a 192.168.50.0/24 --share-lan
+
+# 移除下级内网设置
+sudo openvpn-managerctl network branch-a ""
+
+sudo openvpn-managerctl disconnect branch-a
+sudo openvpn-managerctl profile branch-a
+sudo openvpn-managerctl revoke branch-a
 sudo openvpn-managerctl logs 100
 sudo openvpn-managerctl restart
+sudo openvpn-managerctl update
+sudo openvpn-managerctl update-status
 ```
 
-生成的客户端配置位于 `/var/lib/openvpn-manager/clients/`，默认仅 root 和服务组可读。
+`profile` 输出包含私钥，请勿将结果写入不受保护的日志。生成的客户端文件位于
+`/var/lib/openvpn-manager/clients/`，默认仅 root 和服务组可读。
 
-## 本地预览中文界面
+## 关键文件
 
-无需安装 OpenVPN：
-
-```bash
-python3 backend/server.py --demo
+```text
+/etc/openvpn/server/server.conf                 OpenVPN 服务端配置
+/etc/openvpn/server/ccd/                        客户端 iroute 与定向推送路由
+/etc/openvpn/server/easy-rsa/pki/               CA、证书、私钥与 CRL
+/etc/openvpn-manager/server.json                管理面板服务端参数
+/etc/openvpn-manager/client-networks.json       客户端下级内网策略
+/etc/openvpn-manager/tls/                       管理控制台 HTTPS 证书
+/var/lib/openvpn-manager/clients/               生成的 .ovpn 文件
+/var/lib/openvpn-manager/update-status.json     在线更新状态
+/root/openvpn-manager-credentials.txt           首次生成的控制台凭据
 ```
 
-然后访问 `http://127.0.0.1:9090`，使用 `admin` / `demo` 登录。演示模式只监听本机回环地址，
-所有样例数据均保存在内存中。
+## 备份、恢复与卸载
 
-## 备份与恢复
-
-请安全备份以下路径：
+建议离线备份：
 
 ```text
 /etc/openvpn/server/easy-rsa/pki
@@ -148,71 +246,59 @@ python3 backend/server.py --demo
 /var/lib/openvpn-manager/clients
 ```
 
-重新执行 `install.sh` 时，现有 CA 不会被覆盖；受管配置会先备份到
-`/var/backups/openvpn-web-manager/` 下的时间戳目录。
-
-移除服务但保留 PKI、配置和客户端文件：
+仅移除服务并保留 PKI、配置和客户端文件：
 
 ```bash
 sudo ./uninstall.sh --yes
 ```
 
-永久删除 PKI、配置和客户端文件：
+永久删除受管数据：
 
 ```bash
 sudo ./uninstall.sh --purge --yes
 ```
 
-`--purge` 不可恢复，也无法让已经导出的客户端配置自动失效。如果 CA 私钥可能泄漏，应直接轮换或退役服务器。
+`--purge` 不可恢复。如果 CA 私钥可能泄漏，应轮换或退役整个 CA，而不是只删除服务器文件。
 
-## 开发与测试
+## 本地预览与测试
+
+无需安装 OpenVPN 即可预览：
+
+```bash
+python3 backend/server.py --demo
+```
+
+访问 `http://127.0.0.1:9090`，账号为 `admin` / `demo`。演示模式仅监听本机回环地址，样例数据
+保存在内存中。
 
 ```bash
 make test
-make demo
 ```
 
-测试覆盖密码与会话算法、输入校验、Easy-RSA 索引解析、OpenVPN 状态解析、客户端配置渲染、
-JavaScript 语法和 Shell 语法。
+测试覆盖输入校验、密码与会话、Easy-RSA 索引、OpenVPN 状态、配置渲染、客户端路由、前端 DOM
+引用、JavaScript 语法、Bash 语法和 ShellCheck。
 
-## 安装中断后的恢复
+## 旧版本安装中断恢复
 
-如果旧版本停在 `sysctl` 的 conntrack 参数错误处，这些报错通常来自主机上其他
-`/etc/sysctl.d/` 配置，而不是 OpenVPN 配置本身。拉取最新版并使用与首次安装相同的参数重新执行即可：
+如果旧版本停在 conntrack `sysctl` 参数错误处，拉取最新版并重新执行即可。安装器只加载自身的
+IPv4 转发配置，不再加载主机上的其他第三方 sysctl 文件：
 
 ```bash
-git pull
-sudo ./install.sh --endpoint vpn.example.com
+git pull --ff-only
+sudo ./install.sh --existing-action preserve
 ```
 
-安装器可重复执行：已有 CA 和控制台密码会被保留，并在继续安装前创建备份。
-如果旧安装恰好在生成密码后、写入最终凭据前中断，最新版会识别该未完成状态，自动生成新密码，
-并提前写入 `/root/openvpn-manager-credentials.txt`，避免再次中断后无法登录。
-
-如果 v1.1.1 在“正在配置 HTTPS”之后出现以下错误：
-
-```text
-cannot load certificate "/etc/openvpn-manager/tls/server.crt": No such file or directory
-```
-
-这是 v1.1.1 的配置目录命名不一致所致。v1.1.2 会先备份，再将
-`/etc/openvpn-web-manager` 和 `/var/lib/openvpn-web-manager` 中的认证配置、TLS 证书及客户端状态
-迁移到规范目录，并保留已经写入的控制台密码。更新后执行：
-
-```bash
-git pull
-sudo ./install.sh --existing-action preserve --endpoint vpn.example.com
-```
-
-请将 `vpn.example.com` 替换为首次安装使用的地址；如果首次安装自定义了 VPN 端口、管理端口、
-访问网段或证书，也应再次传入相同参数。
+如果 v1.1.1 在“正在配置 HTTPS”后报告缺少
+`/etc/openvpn-manager/tls/server.crt`，最新版会备份并迁移
+`/etc/openvpn-web-manager` 与 `/var/lib/openvpn-web-manager` 中的认证、TLS 和客户端状态，然后继续安装。
 
 ## 安全边界
 
-- 当前提供一个本地管理员账号。如需多用户或 MFA，请将控制台接入 SSO，或仅在私有管理网络开放。
-- 自签名证书可以加密流量，但不能提供公网信任；生产环境建议替换为受信任证书。
-- 防火墙自动化使用主机的 `iptables` 兼容层；复杂的 firewalld/nftables 策略可能需要手动整合。
-- 吊销客户端后会重启 OpenVPN，以立即断开活动连接；所有已连接客户端可能短暂中断。
+- 当前提供一个本地管理员账号；需要多用户或 MFA 时，建议接入 SSO 或仅在私有管理网络开放。
+- 自签名证书可以加密流量，但不能提供公网身份信任；生产环境建议安装受信任证书。
+- 自动防火墙使用主机的 `iptables` 兼容层；复杂的 nftables、firewalld 或云防火墙策略需自行整合。
+- Web 查看器会显示客户端私钥；管理员设备、浏览器扩展和剪贴板都应处于可信环境。
+- 在线更新固定从本项目 GitHub Release 获取源码，但生产环境仍建议先在测试节点验证新版本。
 
 ## 许可证
 

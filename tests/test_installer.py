@@ -96,6 +96,62 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertLess(credential_write, sysctl_apply)
         self.assertLess(credential_write, service_install)
 
+    def test_runtime_sync_management_socket_and_online_updater_are_installed(self) -> None:
+        installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+        override = (ROOT / "config/openvpn-service-override.conf").read_text(encoding="utf-8")
+        updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
+        self.assertIn('VERSION="1.2.0"', installer)
+        self.assertIn('agent.py" --direct sync_runtime', installer)
+        self.assertIn("openvpn-manager-update.service", installer)
+        self.assertIn("RuntimeDirectory=openvpn-manager", override)
+        self.assertIn("RuntimeDirectoryPreserve=yes", override)
+        self.assertIn("api.github.com/repos/$REPOSITORY/releases/latest", updater)
+        self.assertIn("--existing-action preserve", updater)
+        self.assertIn("--vpn-port random", updater)
+        self.assertIn("--vpn-protocol", updater)
+        self.assertIn("--vpn-subnet", updater)
+        self.assertIn("更新包包含不允许的特殊文件", updater)
+
+    def test_managed_upgrade_preserves_unset_server_parameters_and_rerandomizes_port(self) -> None:
+        installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("load_preserved_server_settings", installer)
+        self.assertIn('VPN_PORT="random"', installer)
+        self.assertIn("generate_random_vpn_port", installer)
+        self.assertIn("10000 + secrets.randbelow(20000)", installer)
+        self.assertIn('OLD_VPN_PORT="${values[1]}"', installer)
+        self.assertIn("port == web_port or port == previous_port", installer)
+        self.assertNotIn('[[ "$VPN_PORT_EXPLICIT" == "1" ]] || VPN_PORT="${values[1]}"', installer)
+        self.assertNotIn('VPN_PORT_EXPLICIT="0"', installer)
+        self.assertIn('[[ "$VPN_SUBNET_EXPLICIT" == "1" ]] || VPN_SUBNET=', installer)
+        self.assertIn('[[ "$WEB_PORT_EXPLICIT" == "1" ]] || WEB_PORT=', installer)
+        self.assertIn('OLD_VPN_SUBNET="${values[3]}"', installer)
+        self.assertIn("已清理旧客户端地址池记录", installer)
+
+    def test_online_updater_refuses_release_downgrades(self) -> None:
+        updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
+        self.assertIn("dpkg --compare-versions", updater)
+        self.assertIn("已拒绝降级", updater)
+        self.assertIn("re.fullmatch", updater)
+
+    def test_agent_can_reset_openvpn_address_pool(self) -> None:
+        service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
+        self.assertIn("/var/lib/openvpn/server", service)
+
+    def test_firewall_uses_dedicated_chains_for_client_lan_policy(self) -> None:
+        firewall = (ROOT / "scripts/openvpn-manager-firewall").read_text(encoding="utf-8")
+        self.assertIn('FORWARD_CHAIN="OVPNMGR_FORWARD"', firewall)
+        self.assertIn("append_client_route_policy", firewall)
+        self.assertIn('case "$mode" in', firewall)
+        self.assertIn('"$TAG-client-lan-deny"', firewall)
+        self.assertIn('CLIENT_ROUTES_FILE', firewall)
+
+    def test_updater_service_is_not_stopped_as_an_openvpn_daemon(self) -> None:
+        installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn('$1 == "openvpn.service"', installer)
+        self.assertIn('/^openvpn-server@.*\\.service$/', installer)
+        stop_function = installer[installer.index("stop_existing_openvpn_units()") : installer.index("backup_existing_openvpn()")]
+        self.assertNotIn("openvpn-manager-update.service", stop_function)
+
 
 if __name__ == "__main__":
     unittest.main()

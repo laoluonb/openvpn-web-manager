@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenVPN Web Manager online update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/openvpn-manager-update
+TimeoutStartSec=30min
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
