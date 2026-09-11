@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenVPN Web Manager firewall rules
+After=network-online.target
+Wants=network-online.target
+Before=openvpn-server@server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openvpn-manager-firewall start
+ExecStop=/usr/local/sbin/openvpn-manager-firewall stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

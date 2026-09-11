@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ENV_FILE="${OPENVPN_MANAGER_FIREWALL_ENV:-/etc/openvpn-manager/firewall.env}"
+TAG="openvpn-web-manager"
+
+if [[ ! -r "$ENV_FILE" ]]; then
+  echo "缺少防火墙配置：$ENV_FILE" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+
+: "${PUBLIC_INTERFACE:?PUBLIC_INTERFACE is required}"
+: "${VPN_SUBNET:?VPN_SUBNET is required}"
+: "${VPN_PORT:?VPN_PORT is required}"
+: "${VPN_PROTOCOL:=udp}"
+: "${WEB_PORT:?WEB_PORT is required}"
+: "${WEB_ALLOW:=0.0.0.0/0}"
+
+command -v iptables >/dev/null 2>&1 || {
+  echo "需要安装 iptables" >&2
+  exit 1
+}
+
+check_filter() { iptables -w 5 -C "$@" >/dev/null 2>&1; }
+add_filter() {
+  local chain="$1"; shift
+  check_filter "$chain" "$@" || iptables -w 5 -I "$chain" 1 "$@"
+}
+del_filter() {
+  local chain="$1"; shift
+  while check_filter "$chain" "$@"; do
+    iptables -w 5 -D "$chain" "$@"
+  done
+}
+
+check_nat() { iptables -w 5 -t nat -C "$@" >/dev/null 2>&1; }
+add_nat() {
+  local chain="$1"; shift
+  check_nat "$chain" "$@" || iptables -w 5 -t nat -I "$chain" 1 "$@"
+}
+del_nat() {
+  local chain="$1"; shift
+  while check_nat "$chain" "$@"; do
+    iptables -w 5 -t nat -D "$chain" "$@"
+  done
+}
+
+start_rules() {
+  add_filter INPUT -p "$VPN_PROTOCOL" --dport "$VPN_PORT" -m comment --comment "$TAG-vpn" -j ACCEPT
+  add_filter INPUT -p tcp -s "$WEB_ALLOW" --dport "$WEB_PORT" -m comment --comment "$TAG-web" -j ACCEPT
+  add_filter FORWARD -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-forward-out" -j ACCEPT
+  add_filter FORWARD -d "$VPN_SUBNET" -i "$PUBLIC_INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-forward-in" -j ACCEPT
+  add_nat POSTROUTING -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-nat" -j MASQUERADE
+}
+
+stop_rules() {
+  del_nat POSTROUTING -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-nat" -j MASQUERADE
+  del_filter FORWARD -d "$VPN_SUBNET" -i "$PUBLIC_INTERFACE" -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$TAG-forward-in" -j ACCEPT
+  del_filter FORWARD -s "$VPN_SUBNET" -o "$PUBLIC_INTERFACE" -m comment --comment "$TAG-forward-out" -j ACCEPT
+  del_filter INPUT -p tcp -s "$WEB_ALLOW" --dport "$WEB_PORT" -m comment --comment "$TAG-web" -j ACCEPT
+  del_filter INPUT -p "$VPN_PROTOCOL" --dport "$VPN_PORT" -m comment --comment "$TAG-vpn" -j ACCEPT
+}
+
+case "${1:-}" in
+  start) start_rules ;;
+  stop) stop_rules ;;
+  restart) stop_rules; start_rules ;;
+  *) echo "用法：$0 {start|stop|restart}" >&2; exit 2 ;;
+esac

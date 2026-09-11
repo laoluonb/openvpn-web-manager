@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="轻量、安全、现代的 OpenVPN 管理控制台。">
+  <title>OpenVPN 管理中心</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m-9 0 1 15h8l1-15M10 11v5M14 11v5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 9A7 7 0 0 1 18 6l2 6M17.9 15A7 7 0 0 1 6 18l-2-6"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h7M11 17.5h7"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M15 8l3 3M17 6l2 2"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  </svg>
+
+  <section id="loginView" class="auth-shell">
+    <div class="auth-orb auth-orb-one"></div>
+    <div class="auth-orb auth-orb-two"></div>
+    <div class="auth-brand">
+      <span class="brand-mark"><svg><use href="#i-shield"></use></svg></span>
+      <span>OpenVPN 管理中心</span>
+    </div>
+    <div class="login-card">
+      <div class="login-icon"><svg><use href="#i-lock"></use></svg></div>
+      <p class="eyebrow">安全控制台</p>
+      <h1>欢迎回来</h1>
+      <p class="login-copy">登录后即可管理网络的加密访问权限。</p>
+      <form id="loginForm" class="stack-form">
+        <label>
+          <span>用户名</span>
+          <input id="loginUsername" name="username" autocomplete="username" required autofocus>
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <p id="loginError" class="form-error" role="alert"></p>
+        <button id="loginButton" class="button button-primary button-wide" type="submit">
+          <span>登录</span>
+          <svg><use href="#i-chevron"></use></svg>
+        </button>
+      </form>
+      <div class="trust-note"><svg><use href="#i-shield"></use></svg><span>由 TLS 与安全会话机制保护</span></div>
+    </div>
+    <button id="loginThemeButton" class="floating-theme icon-button" type="button" aria-label="切换配色主题">
+      <svg class="theme-icon"><use href="#i-moon"></use></svg>
+    </button>
+  </section>
+
+  <div id="dashboardView" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-mark"><svg><use href="#i-shield"></use></svg></span>
+        <div><strong>OpenVPN</strong><span>管理中心</span></div>
+      </div>
+      <nav class="main-nav" aria-label="Primary navigation">
+        <button class="nav-item active" data-view="overview" type="button"><svg><use href="#i-grid"></use></svg><span>概览</span></button>
+        <button class="nav-item" data-view="clients" type="button"><svg><use href="#i-users"></use></svg><span>客户端</span><span id="clientNavCount" class="nav-count">0</span></button>
+        <button class="nav-item" data-view="system" type="button"><svg><use href="#i-terminal"></use></svg><span>系统</span></button>
+      </nav>
+      <div class="sidebar-security">
+        <div class="mini-shield"><svg><use href="#i-lock"></use></svg></div>
+        <div><strong>本机安全控制</strong><span>权限隔离代理</span></div>
+      </div>
+      <div class="sidebar-user">
+        <div id="userAvatar" class="avatar">A</div>
+        <div class="user-copy"><strong id="sidebarUsername">admin</strong><button id="passwordButton" type="button">修改密码</button></div>
+        <button id="logoutButton" class="logout-button" type="button" title="退出登录" aria-label="退出登录"><svg><use href="#i-chevron"></use></svg></button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="topbar-title">
+          <button id="menuButton" class="icon-button mobile-menu" type="button" aria-label="打开导航"><svg><use href="#i-menu"></use></svg></button>
+          <div><p id="pageEyebrow" class="eyebrow">控制中心</p><h1 id="pageTitle">概览</h1></div>
+        </div>
+        <div class="topbar-actions">
+          <span id="lastUpdated" class="last-updated">等待状态更新</span>
+          <button id="refreshButton" class="icon-button" type="button" title="刷新" aria-label="刷新控制台"><svg><use href="#i-refresh"></use></svg></button>
+          <button id="themeButton" class="icon-button" type="button" title="切换主题" aria-label="切换配色主题"><svg class="theme-icon"><use href="#i-moon"></use></svg></button>
+          <button id="createClientTop" class="button button-primary" type="button"><svg><use href="#i-plus"></use></svg><span>新建客户端</span></button>
+        </div>
+      </header>
+
+      <section id="overviewPanel" class="view-panel">
+        <article class="connection-hero">
+          <div class="hero-copy">
+            <div id="heroStatus" class="service-pill"><span class="status-dot"></span><span>正在检查服务</span></div>
+            <h2>让你的私有网络，<br><span>始终尽在掌控。</span></h2>
+            <p>在一个轻量控制台中签发安全配置、查看在线连接，并及时回收访问权限。</p>
+            <div class="endpoint-line"><span>VPN 地址</span><code id="heroEndpoint">—</code><button id="copyEndpoint" type="button" aria-label="复制 VPN 地址"><svg><use href="#i-copy"></use></svg></button></div>
+          </div>
+          <div class="hero-visual" aria-hidden="true">
+            <div class="network-ring ring-one"></div>
+            <div class="network-ring ring-two"></div>
+            <div class="network-node node-one"></div>
+            <div class="network-node node-two"></div>
+            <div class="network-node node-three"></div>
+            <div class="hero-shield"><svg><use href="#i-shield"></use></svg></div>
+          </div>
+        </article>
+
+        <div class="metric-grid">
+          <article class="metric-card"><div class="metric-icon metric-green"><svg><use href="#i-activity"></use></svg></div><div><span>当前在线</span><strong id="onlineCount">—</strong><small id="onlineHint">实时 VPN 会话</small></div></article>
+          <article class="metric-card"><div class="metric-icon metric-indigo"><svg><use href="#i-key"></use></svg></div><div><span>有效配置</span><strong id="activeCount">—</strong><small id="activeHint">已签发凭据</small></div></article>
+          <article class="metric-card"><div class="metric-icon metric-cyan"><svg><use href="#i-users"></use></svg></div><div><span>全部记录</span><strong id="totalCount">—</strong><small>包含已吊销客户端</small></div></article>
+          <article class="metric-card"><div class="metric-icon metric-amber"><svg><use href="#i-server"></use></svg></div><div><span>传输协议</span><strong id="transportValue">—</strong><small id="subnetValue">VPN 子网</small></div></article>
+        </div>
+
+        <div class="content-grid">
+          <article class="panel-card recent-card">
+            <div class="panel-heading"><div><p class="eyebrow">访问清单</p><h3>最近客户端</h3></div><button class="text-button" data-jump="clients" type="button">查看全部 <svg><use href="#i-chevron"></use></svg></button></div>
+            <div id="recentClients" class="recent-list"><div class="empty-state compact">正在加载客户端…</div></div>
+          </article>
+          <article class="panel-card server-card">
+            <div class="panel-heading"><div><p class="eyebrow">服务器</p><h3>运行状态</h3></div><span id="serverStateBadge" class="badge neutral">检查中</span></div>
+            <dl class="server-details">
+              <div><dt>服务状态</dt><dd id="serviceValue">—</dd></div>
+              <div><dt>OpenVPN</dt><dd id="versionValue">—</dd></div>
+              <div><dt>连接网关</dt><dd id="gatewayValue">—</dd></div>
+              <div><dt>管理入口</dt><dd id="managementValue">—</dd></div>
+            </dl>
+            <button id="restartButton" class="button button-secondary button-wide" type="button"><svg><use href="#i-refresh"></use></svg><span>重启 OpenVPN</span></button>
+          </article>
+        </div>
+      </section>
+
+      <section id="clientsPanel" class="view-panel hidden">
+        <article class="panel-card clients-card">
+          <div class="panel-heading clients-heading">
+            <div><p class="eyebrow">证书清单</p><h3>客户端配置</h3><p>请为每个人或每台设备创建独立配置；不再需要访问时，应立即吊销。</p></div>
+            <button id="createClientPanel" class="button button-primary" type="button"><svg><use href="#i-plus"></use></svg><span>新建客户端</span></button>
+          </div>
+          <div class="table-tools">
+            <label class="search-box"><svg><use href="#i-search"></use></svg><input id="clientSearch" placeholder="搜索客户端" aria-label="搜索客户端"></label>
+            <div class="legend"><span><i class="legend-dot online"></i>在线</span><span><i class="legend-dot offline"></i>离线</span><span><i class="legend-dot revoked"></i>已吊销</span></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>客户端</th><th>状态</th><th>VPN 地址</th><th>流量</th><th>到期时间</th><th class="actions-column">操作</th></tr></thead>
+              <tbody id="clientTableBody"><tr><td colspan="6"><div class="empty-state">正在加载客户端清单…</div></td></tr></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="systemPanel" class="view-panel hidden">
+        <div class="system-grid">
+          <article class="panel-card config-card">
+            <div class="panel-heading"><div><p class="eyebrow">配置</p><h3>服务器详情</h3></div><div class="metric-icon metric-indigo"><svg><use href="#i-server"></use></svg></div></div>
+            <dl class="config-list">
+              <div><dt>公网地址</dt><dd id="configEndpoint">—</dd></div>
+              <div><dt>VPN 传输</dt><dd id="configTransport">—</dd></div>
+              <div><dt>私有子网</dt><dd id="configSubnet">—</dd></div>
+              <div><dt>控制台端口</dt><dd id="configWebPort">—</dd></div>
+              <div><dt>服务状态</dt><dd id="configState">—</dd></div>
+            </dl>
+            <div class="info-callout"><svg><use href="#i-shield"></use></svg><p><strong>安全提示</strong><span>请限制管理端口的来源，并离线备份 CA 私钥。</span></p></div>
+          </article>
+          <article class="panel-card log-card">
+            <div class="panel-heading"><div><p class="eyebrow">journalctl</p><h3>最近服务日志</h3></div><button id="loadLogsButton" class="button button-secondary" type="button"><svg><use href="#i-refresh"></use></svg><span>重新加载</span></button></div>
+            <pre id="logOutput" class="log-output" tabindex="0">点击“重新加载”获取最近的 OpenVPN 日志。</pre>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+  <dialog id="clientDialog" class="modal">
+    <form id="clientForm" method="dialog">
+      <div class="modal-icon"><svg><use href="#i-key"></use></svg></div>
+      <button class="modal-close" data-close-dialog="clientDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
+      <p class="eyebrow">新凭据</p>
+      <h2>创建客户端配置</h2>
+      <p>请输入简短的人员或设备名称。它将成为证书身份，吊销后不能重复使用。</p>
+      <label><span>客户端名称</span><input id="clientName" name="name" placeholder="例如 ethan-phone" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,31}" autocomplete="off" required><small>仅支持英文字母、数字、连字符和下划线。</small></label>
+      <p id="clientFormError" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button class="button button-ghost" data-close-dialog="clientDialog" type="button">取消</button><button id="createClientButton" class="button button-primary" type="submit"><svg><use href="#i-plus"></use></svg><span>创建配置</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="passwordDialog" class="modal">
+    <form id="passwordForm" method="dialog">
+      <div class="modal-icon"><svg><use href="#i-lock"></use></svg></div>
+      <button class="modal-close" data-close-dialog="passwordDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
+      <p class="eyebrow">账户安全</p>
+      <h2>修改控制台密码</h2>
+      <p>请使用至少 12 个字符，并将新密码保存在可信的密码管理器中。</p>
+      <label><span>当前密码</span><input id="currentPassword" type="password" autocomplete="current-password" required></label>
+      <label><span>新密码</span><input id="newPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+      <label><span>确认新密码</span><input id="confirmPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+      <p id="passwordFormError" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button class="button button-ghost" data-close-dialog="passwordDialog" type="button">取消</button><button id="changePasswordButton" class="button button-primary" type="submit"><span>更新密码</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog" class="modal modal-small">
+    <div class="confirm-content">
+      <div id="confirmIcon" class="modal-icon danger"><svg><use href="#i-trash"></use></svg></div>
+      <h2 id="confirmTitle">确认操作</h2>
+      <p id="confirmMessage">此操作无法撤销。</p>
+      <div class="modal-actions"><button id="confirmCancel" class="button button-ghost" type="button">取消</button><button id="confirmAction" class="button button-danger" type="button">确认</button></div>
+    </div>
+  </dialog>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
