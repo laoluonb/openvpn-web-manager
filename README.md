@@ -186,6 +186,8 @@ sudo ./install.sh --endpoint vpn.example.com
 ```
 
 安装器可重复执行：已有 CA 和控制台密码会被保留，并在继续安装前创建备份。
+如果旧安装恰好在生成密码后、写入最终凭据前中断，最新版会识别该未完成状态，自动生成新密码，
+并提前写入 `/root/openvpn-manager-credentials.txt`，避免再次中断后无法登录。
 
 ## 安全边界
 

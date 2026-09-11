@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.1.0"
+VERSION="1.1.1"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/$APP_NAME"
 STATE_DIR="/var/lib/$APP_NAME"
@@ -391,11 +391,17 @@ chown root:"$WEB_GROUP" "$CONFIG_DIR/server.json"
 chmod 0640 "$CONFIG_DIR/server.json"
 
 log "正在配置控制台认证"
+CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 WEB_CONFIG_EXISTS="0"
 if [[ -s "$CONFIG_DIR/web.json" && "$PASSWORD_EXPLICIT" == "0" ]]; then
-  WEB_CONFIG_EXISTS="1"
-  warn "已保留现有控制台密码。"
-else
+  if [[ -s "$CONFIG_DIR/install-state.json" || -s "$CREDENTIAL_FILE" || -f /etc/systemd/system/openvpn-web-manager.service ]]; then
+    WEB_CONFIG_EXISTS="1"
+    warn "已保留现有控制台密码。"
+  else
+    warn "检测到上次安装在保存明文凭据前中断，将自动生成新的控制台密码。"
+  fi
+fi
+if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
   if [[ -z "$ADMIN_PASSWORD" ]]; then
     ADMIN_PASSWORD="$(openssl rand -hex 16)"
   fi
@@ -411,6 +417,15 @@ pathlib.Path(path).write_text(json.dumps({
     "session_hours": 8,
 }, indent=2) + "\n", encoding="utf-8")
 PY
+  cat >"$CREDENTIAL_FILE" <<EOF
+OpenVPN 管理中心 $VERSION
+管理地址：https://$ENDPOINT:$WEB_PORT
+用户名：$ADMIN_USER
+密码：$ADMIN_PASSWORD
+首个配置：$STATE_DIR/clients/$INITIAL_CLIENT.ovpn
+创建时间：$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  chmod 0600 "$CREDENTIAL_FILE"
 fi
 chown root:"$WEB_GROUP" "$CONFIG_DIR/web.json"
 chmod 0640 "$CONFIG_DIR/web.json"
@@ -502,19 +517,6 @@ pathlib.Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "
 PY
 chown root:"$WEB_GROUP" "$CONFIG_DIR/install-state.json"
 chmod 0640 "$CONFIG_DIR/install-state.json"
-
-CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
-if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
-  cat >"$CREDENTIAL_FILE" <<EOF
-OpenVPN 管理中心 $VERSION
-管理地址：https://$ENDPOINT:$WEB_PORT
-用户名：$ADMIN_USER
-密码：$ADMIN_PASSWORD
-首个配置：$STATE_DIR/clients/$INITIAL_CLIENT.ovpn
-创建时间：$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EOF
-  chmod 0600 "$CREDENTIAL_FILE"
-fi
 
 printf '\n\033[1;32m安装完成。\033[0m\n'
 printf '  管理地址：       https://%s:%s\n' "$ENDPOINT" "$WEB_PORT"
