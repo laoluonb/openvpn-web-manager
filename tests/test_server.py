@@ -61,5 +61,22 @@ class DemoClientLifecycleTests(unittest.TestCase):
         )
 
 
+class DemoUpdateTests(unittest.TestCase):
+    def test_demo_update_check_exposes_current_remote_and_release_fields(self) -> None:
+        result = DemoAgent().request({"action": "check_updates"})
+        for key in (
+            "current_manager_version",
+            "latest_manager_version",
+            "current_openvpn_version",
+            "candidate_openvpn_version",
+            "release_notes",
+            "release_published_at",
+            "update_available",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, result)
+        self.assertFalse(result["update_available"])
+
+
 if __name__ == "__main__":
     unittest.main()

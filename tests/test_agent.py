@@ -7,10 +7,15 @@ import unittest
 from backend.agent import (
     AgentError,
     client_artifact_entries,
+    compare_semantic_versions,
+    extract_openvpn_version,
     filter_active_clients,
     filter_client_log_lines,
     normalize_client_network,
     normalize_server_settings,
+    parse_apt_package_versions,
+    parse_github_release,
+    parse_semantic_version,
     parse_index,
     parse_status,
     render_ccd_configs,
@@ -21,6 +26,38 @@ from backend.agent import (
 
 
 class AgentParsingTests(unittest.TestCase):
+    def test_update_version_helpers(self) -> None:
+        self.assertEqual(parse_semantic_version("v1.2.7")[:3], (1, 2, 7))
+        self.assertEqual(compare_semantic_versions("1.2.10", "1.2.9"), 1)
+        self.assertLess(compare_semantic_versions("1.2.7-beta.1", "1.2.7"), 0)
+        self.assertEqual(extract_openvpn_version("OpenVPN 2.6.14 x86_64-pc-linux-gnu"), "2.6.14")
+        self.assertEqual(
+            parse_apt_package_versions(
+                "openvpn:\n  Installed: 2.6.14-0+deb12u2\n  Candidate: 2.6.15-1\n"
+            ),
+            ("2.6.14-0+deb12u2", "2.6.15-1"),
+        )
+
+    def test_github_release_payload_is_reduced_to_safe_fields(self) -> None:
+        payload = {
+            "tag_name": "v1.2.7",
+            "name": "v1.2.7：更新检查",
+            "body": "## 更新内容\n\n- 新增版本检查",
+            "html_url": "https://evil.example/should-not-be-used",
+            "tarball_url": "https://evil.example/archive",
+            "published_at": "2026-09-12T00:00:00Z",
+            "draft": False,
+            "prerelease": False,
+        }
+        import json
+
+        release = parse_github_release(json.dumps(payload))
+        self.assertEqual(release["tag"], "v1.2.7")
+        self.assertEqual(release["url"], "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.7")
+        self.assertNotIn("evil.example", release["url"])
+        with self.assertRaises(AgentError):
+            parse_github_release('{"tag_name":"latest","draft":false,"prerelease":false}')
+
     def test_client_name_validation(self) -> None:
         self.assertEqual(validate_client_name("ethan-phone_2"), "ethan-phone_2")
         for value in ("../root", "white space", "server", "", "x" * 33):

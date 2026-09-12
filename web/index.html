@@ -240,13 +240,21 @@
           </article>
           <article class="panel-card update-card">
             <div class="panel-heading"><div><p class="eyebrow">在线维护</p><h3>一键更新</h3></div><div class="metric-icon metric-cyan"><svg><use href="#i-cloud"></use></svg></div></div>
-            <p class="update-copy">从本项目 GitHub 最新稳定版本更新整个管理面板，同时通过系统软件源升级 OpenVPN。执行前会自动备份，并保留现有 VPN 端口和服务端参数。</p>
-            <dl class="update-versions">
-              <div><dt>管理面板</dt><dd id="managerVersion">—</dd></div>
-              <div><dt>OpenVPN</dt><dd id="updateOpenvpnVersion">—</dd></div>
-            </dl>
+            <p class="update-copy">检查本机与远程版本、OpenVPN 软件源候选版本和 GitHub Release 更新日志。执行更新前会自动备份，并保留现有 VPN 端口和服务端参数。</p>
+            <div id="updateAvailability" class="update-availability neutral"><span class="availability-dot"></span><strong>尚未检查远程版本</strong></div>
+            <div class="update-version-grid">
+              <div class="update-version-card"><span>管理面板</span><strong>当前 <b id="managerVersion">—</b></strong><small>远程最新 <b id="managerLatestVersion">—</b></small></div>
+              <div class="update-version-card"><span>OpenVPN</span><strong>当前 <b id="updateOpenvpnVersion">—</b></strong><small>软件源候选 <b id="updateOpenvpnCandidate">—</b></small></div>
+            </div>
+            <div class="update-release-meta"><span id="updateReleaseName">尚未获取 GitHub Release</span><span id="updateReleasePublishedAt">—</span><span id="updateCheckedAt">—</span></div>
+            <p id="updateCheckWarning" class="update-check-warning" role="status"></p>
             <div id="updateStatusBox" class="update-status"><i></i><div><strong id="updateStatusTitle">等待检查</strong><span id="updateStatusMessage">打开系统页面后将读取更新状态。</span></div></div>
-            <button id="updateButton" class="button button-primary button-wide" type="button"><svg><use href="#i-cloud"></use></svg><span>更新面板与 OpenVPN</span></button>
+            <div class="update-actions"><button id="checkUpdateButton" class="button button-secondary" type="button"><svg><use href="#i-refresh"></use></svg><span>检查更新</span></button><button id="updateButton" class="button button-primary" type="button"><svg><use href="#i-cloud"></use></svg><span>更新面板与 OpenVPN</span></button></div>
+            <details class="update-notes">
+              <summary><span>GitHub 更新日志</span><small>查看远程 Release 内容</small></summary>
+              <pre id="updateReleaseNotes">尚未获取更新日志。</pre>
+              <a id="updateReleaseLink" class="update-release-link hidden" href="#" target="_blank" rel="noopener noreferrer">打开 GitHub Release</a>
+            </details>
           </article>
           <article class="panel-card log-card">
             <div class="panel-heading"><div><p class="eyebrow">journalctl</p><h3>最近服务日志</h3></div><button id="loadLogsButton" class="button button-secondary" type="button"><svg><use href="#i-refresh"></use></svg><span>重新加载</span></button></div>
@@ -365,6 +373,19 @@
       <p id="passwordFormError" class="form-error" role="alert"></p>
       <div class="modal-actions"><button class="button button-ghost" data-close-dialog="passwordDialog" type="button">取消</button><button id="changePasswordButton" class="button button-primary" type="submit"><span>更新密码</span></button></div>
     </form>
+  </dialog>
+
+  <dialog id="updateDialog" class="modal modal-small update-dialog">
+    <div class="confirm-content">
+      <div class="modal-icon"><svg><use href="#i-cloud"></use></svg></div>
+      <p class="eyebrow">版本提醒</p>
+      <h2>发现可用更新</h2>
+      <p id="updateDialogSummary">检测到新的管理面板或 OpenVPN 软件包。</p>
+      <div class="update-dialog-version"><span>最新管理面板版本</span><strong id="updateDialogVersion">—</strong></div>
+      <div id="updateDialogComponents" class="update-dialog-components">—</div>
+      <pre id="updateDialogNotes" class="update-dialog-notes">尚未获取更新日志。</pre>
+      <div class="modal-actions"><button id="updateDialogLater" class="button button-ghost" data-close-dialog="updateDialog" type="button">稍后处理</button><button id="updateDialogAction" class="button button-primary" type="button"><svg><use href="#i-cloud"></use></svg><span>立即更新</span></button></div>
+    </div>
   </dialog>
 
   <dialog id="confirmDialog" class="modal modal-small">

@@ -200,7 +200,9 @@ OpenWrt 日志中若能看到 `Initialization Sequence Completed`，且可以访
 
 ## 一键在线更新
 
-进入“系统”页面，点击“更新面板与 OpenVPN”。更新任务会：
+进入“系统”页面，先点击“检查更新”或等待页面自动检查，再点击“更新面板与 OpenVPN”。系统会显示当前版本、远程最新版本、OpenVPN 软件源候选版本、Release 日期和更新日志；发现新版本时会弹出中文提醒框。
+
+更新任务会：
 
 1. 读取 `laoluonb/openvpn-web-manager` 最新稳定 Release；
 2. 下载并安全检查 GitHub 自动生成的源码包；
@@ -208,6 +210,8 @@ OpenWrt 日志中若能看到 `Initialization Sequence Completed`，且可以访
 4. 保留当前 VPN 端口及其他服务端参数并运行最新版安装器；
 5. 通过系统软件源安装可用的最新版 OpenVPN；
 6. 在页面显示排队、运行、完成或失败状态。
+
+版本检查不会修改 OpenVPN 配置。管理面板远程版本来自 GitHub 最新稳定 Release；OpenVPN 候选版本来自服务器当前 APT 软件源。网络暂时不可用时，页面会保留上次成功检查结果，不影响正在运行的 VPN。
 
 更新不会更换 VPN 端口，也不需要重新下载客户端配置。更新期间管理页面和 VPN 连接可能短暂中断。
 失败时可查看：
@@ -259,6 +263,7 @@ sudo openvpn-managerctl update-status
 /etc/openvpn-manager/tls/                       管理控制台 HTTPS 证书
 /var/lib/openvpn-manager/clients/               生成的 .ovpn 文件
 /var/lib/openvpn-manager/update-status.json     在线更新状态
+/var/lib/openvpn-manager/update-check.json      最近一次版本检查结果
 /root/openvpn-manager-credentials.txt           首次生成的控制台凭据
 ```
 

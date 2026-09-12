@@ -8,6 +8,9 @@ const state = {
   search: "",
   timer: null,
   updateTimer: null,
+  updateCheckTimer: null,
+  updateCheckPromise: null,
+  updateCheck: null,
   confirmAction: null,
   profile: null,
   clientLogsName: "",
@@ -74,8 +77,10 @@ function toggleTheme() {
 function clearTimers() {
   window.clearInterval(state.timer);
   window.clearInterval(state.updateTimer);
+  window.clearInterval(state.updateCheckTimer);
   state.timer = null;
   state.updateTimer = null;
+  state.updateCheckTimer = null;
 }
 
 function showLogin() {
@@ -98,8 +103,11 @@ function showDashboard(session) {
   byId("userAvatar").textContent = (state.user[0] || "A").toUpperCase();
   switchView("overview");
   loadOverview();
+  loadUpdateCheck(true, true);
   window.clearInterval(state.timer);
   state.timer = window.setInterval(() => loadOverview(true), 15000);
+  window.clearInterval(state.updateCheckTimer);
+  state.updateCheckTimer = window.setInterval(() => loadUpdateCheck(true, true), 30 * 60 * 1000);
 }
 
 async function restoreSession() {
@@ -152,6 +160,7 @@ function switchView(view) {
   if (view === "system") {
     loadLogs();
     loadUpdateStatus();
+    loadUpdateCheck();
   }
   if (view === "server" && state.overview && !state.serverDirty) {
     renderServerForm(state.overview.status);
@@ -768,6 +777,89 @@ function renderUpdateStatus(status) {
   }
 }
 
+function updateAvailableLabel(check) {
+  if (!check) return { className: "neutral", text: "尚未检查远程版本" };
+  if (check.manager_update_available) {
+    return { className: "available", text: `发现管理面板新版本 ${check.latest_manager_version || ""}`.trim() };
+  }
+  if (check.openvpn_update_available) return { className: "available", text: "发现 OpenVPN 软件包更新" };
+  return { className: "current", text: "当前已是最新版本" };
+}
+
+function renderUpdateCheck(check, { notify = false } = {}) {
+  state.updateCheck = check;
+  const availability = byId("updateAvailability");
+  const label = updateAvailableLabel(check);
+  availability.className = `update-availability ${label.className}`;
+  availability.querySelector("strong").textContent = label.text;
+  byId("managerVersion").textContent = check.current_manager_version || "未知";
+  byId("managerLatestVersion").textContent = check.latest_manager_version || "未知";
+  byId("updateOpenvpnVersion").textContent = check.current_openvpn_version || "未知";
+  byId("updateOpenvpnCandidate").textContent = check.candidate_openvpn_version || "暂无";
+  byId("updateReleaseName").textContent = check.release_name || "GitHub 最新稳定 Release";
+  byId("updateReleasePublishedAt").textContent = check.release_published_at ? `发布于 ${formatDateTime(check.release_published_at)}` : "未提供发布日期";
+  byId("updateCheckedAt").textContent = check.checked_at
+    ? `${check.check_warning ? "上次检查于" : "检查于"} ${formatDateTime(check.checked_at)}`
+    : "—";
+  byId("updateCheckWarning").textContent = check.check_warning || "";
+  byId("updateReleaseNotes").textContent = check.release_notes || "本次发布没有填写更新日志。";
+  const link = byId("updateReleaseLink");
+  if (check.release_url) {
+    link.href = check.release_url;
+    link.classList.remove("hidden");
+  } else {
+    link.classList.add("hidden");
+  }
+  if (notify && check.update_available) maybeShowUpdateDialog(check);
+}
+
+function maybeShowUpdateDialog(check) {
+  const version = String(check.latest_manager_version || "").trim();
+  const notificationKey = [
+    version,
+    String(check.candidate_openvpn_version || ""),
+    check.manager_update_available ? "manager" : "",
+    check.openvpn_update_available ? "openvpn" : "",
+  ].join("|");
+  if (!version || localStorage.getItem("ovpn-update-notified") === notificationKey) return;
+  localStorage.setItem("ovpn-update-notified", notificationKey);
+  byId("updateDialogVersion").textContent = version;
+  byId("updateDialogSummary").textContent = check.manager_update_available && check.openvpn_update_available
+    ? "管理面板和 OpenVPN 都有可用更新。"
+    : check.manager_update_available
+      ? "管理面板有新版本可用，OpenVPN 当前已是软件源最新版本。"
+      : "OpenVPN 软件源有新版本可用，管理面板当前已是最新版本。";
+  byId("updateDialogComponents").textContent = [
+    check.manager_update_available ? `管理面板：${check.current_manager_version || "未知"} → ${check.latest_manager_version || "未知"}` : "管理面板：无需更新",
+    check.openvpn_update_available ? `OpenVPN：${check.current_openvpn_version || "未知"} → ${check.candidate_openvpn_version || "未知"}` : "OpenVPN：无需更新",
+  ].join("\n");
+  byId("updateDialogNotes").textContent = check.release_notes || "本次发布没有填写更新日志。";
+  openDialog("updateDialog");
+}
+
+async function loadUpdateCheck(quiet = false, notify = !quiet, force = false) {
+  if (state.updateCheckPromise) return state.updateCheckPromise;
+  const button = byId("checkUpdateButton");
+  if (!quiet) setBusy(button, true, "正在检查…");
+  state.updateCheckPromise = (async () => {
+    try {
+      const check = await api(`/api/update/check?force=${force ? "1" : "0"}`);
+      renderUpdateCheck(check, { notify });
+    } catch (err) {
+      if (!quiet) {
+        const availability = byId("updateAvailability");
+        availability.className = "update-availability error";
+        availability.querySelector("strong").textContent = "远程版本检查失败";
+        toast("检查更新失败", err.message, "error");
+      }
+    } finally {
+      if (!quiet) setBusy(button, false);
+      state.updateCheckPromise = null;
+    }
+  })();
+  return state.updateCheckPromise;
+}
+
 async function loadUpdateStatus(quiet = false) {
   try {
     renderUpdateStatus(await api("/api/update"));
@@ -789,6 +881,11 @@ function confirmUpdate() {
       switchView("system");
     },
   });
+}
+
+function confirmUpdateFromDialog() {
+  closeDialog("updateDialog");
+  confirmUpdate();
 }
 
 async function changePassword(event) {
@@ -857,7 +954,9 @@ function bindEvents() {
   byId("restartButton").addEventListener("click", confirmRestart);
   byId("loadLogsButton").addEventListener("click", loadLogs);
   byId("refreshClientLogsButton").addEventListener("click", loadClientLogs);
+  byId("checkUpdateButton").addEventListener("click", () => loadUpdateCheck(false, true, true));
   byId("updateButton").addEventListener("click", confirmUpdate);
+  byId("updateDialogAction").addEventListener("click", confirmUpdateFromDialog);
   byId("copyEndpoint").addEventListener("click", copyEndpoint);
   byId("copyProfileButton").addEventListener("click", () => {
     copyText(state.profile?.content, "完整 .ovpn 配置已复制。" ).catch((err) => toast("复制失败", err.message, "error"));

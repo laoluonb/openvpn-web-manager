@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.6"
+VERSION="1.2.7"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -704,6 +704,7 @@ data = {
     "install_state_path": "/etc/openvpn-manager/install-state.json",
     "update_request_path": "/var/lib/openvpn-manager/update-request.json",
     "update_status_path": "/var/lib/openvpn-manager/update-status.json",
+    "update_check_path": "/var/lib/openvpn-manager/update-check.json",
     "update_service_name": "openvpn-manager-update.service",
     "web_group": web_group,
 }

@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import socketserver
+import ssl
 import stat
 import struct
 import subprocess
@@ -26,6 +27,8 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from typing import Any
 
 try:  # Linux-only account databases; parsing/rendering tests also run on Windows.
@@ -48,6 +51,118 @@ PRIVATE_V4_NETWORKS = tuple(
 )
 SUPPORTED_DATA_CIPHERS = ("AES-256-GCM", "AES-128-GCM", "CHACHA20-POLY1305")
 SUPPORTED_AUTH_DIGESTS = ("SHA256", "SHA384", "SHA512")
+GITHUB_REPOSITORY = "laoluonb/openvpn-web-manager"
+GITHUB_RELEASE_URL = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+GITHUB_RELEASE_PAGE_PREFIX = f"https://github.com/{GITHUB_REPOSITORY}/releases/tag/"
+VERSION_RE = re.compile(
+    r"^[vV]?(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)"
+    r"(?:-(?P<prerelease>[0-9A-Za-z.-]+))?(?:\+(?P<build>[0-9A-Za-z.-]+))?$"
+)
+OPENVPN_VERSION_RE = re.compile(r"\bOpenVPN\s+(?P<version>[0-9]+(?:\.[0-9]+){1,3})\b", re.IGNORECASE)
+PACKAGE_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+:~_-]*$")
+MAX_RELEASE_BYTES = 512 * 1024
+MAX_RELEASE_NOTES = 24_000
+UPDATE_CHECK_TTL_SECONDS = 300
+
+
+def parse_semantic_version(value: Any) -> tuple[int, int, int, tuple[str, ...]] | None:
+    """Parse a strict, display-safe semantic version used by manager releases."""
+    if not isinstance(value, str):
+        return None
+    match = VERSION_RE.fullmatch(value.strip())
+    if not match:
+        return None
+    prerelease = match.group("prerelease")
+    identifiers = tuple(prerelease.split(".")) if prerelease else ()
+    if any(not item or (item.isdigit() and len(item) > 1 and item.startswith("0")) for item in identifiers):
+        return None
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        identifiers,
+    )
+
+
+def compare_semantic_versions(left: Any, right: Any) -> int:
+    """Return -1, 0, or 1 without relying on lexicographic version ordering."""
+    parsed_left = parse_semantic_version(left)
+    parsed_right = parse_semantic_version(right)
+    if parsed_left is None or parsed_right is None:
+        raise ValueError("版本号格式无效")
+    for index in range(3):
+        if parsed_left[index] != parsed_right[index]:
+            return -1 if parsed_left[index] < parsed_right[index] else 1
+    left_pre = parsed_left[3]
+    right_pre = parsed_right[3]
+    if not left_pre and not right_pre:
+        return 0
+    if not left_pre:
+        return 1
+    if not right_pre:
+        return -1
+    for left_id, right_id in zip(left_pre, right_pre):
+        if left_id == right_id:
+            continue
+        left_numeric = left_id.isdigit()
+        right_numeric = right_id.isdigit()
+        if left_numeric and right_numeric:
+            return -1 if int(left_id) < int(right_id) else 1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return -1 if left_id < right_id else 1
+    if len(left_pre) == len(right_pre):
+        return 0
+    return -1 if len(left_pre) < len(right_pre) else 1
+
+
+def extract_openvpn_version(output: str) -> str | None:
+    """Extract the numeric OpenVPN version from `openvpn --version` output."""
+    match = OPENVPN_VERSION_RE.search(output or "")
+    return match.group("version") if match else None
+
+
+def parse_apt_package_versions(output: str) -> tuple[str | None, str | None]:
+    """Return Installed and Candidate versions from `apt-cache policy` output."""
+    installed: str | None = None
+    candidate: str | None = None
+    for line in (output or "").splitlines():
+        match = re.match(r"^\s*(Installed|Candidate):\s*(\S+)", line)
+        if not match:
+            continue
+        value = match.group(2)
+        if value == "(none)" or not PACKAGE_VERSION_RE.fullmatch(value):
+            value = None
+        if match.group(1) == "Installed":
+            installed = value
+        else:
+            candidate = value
+    return installed, candidate
+
+
+def parse_github_release(payload: str | bytes) -> dict[str, Any]:
+    """Validate and reduce GitHub's latest-release JSON to safe UI fields."""
+    try:
+        data = json.loads(payload)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AgentError("GitHub 返回了无效的更新信息") from exc
+    if not isinstance(data, dict) or data.get("draft") or data.get("prerelease"):
+        raise AgentError("GitHub 最新发布信息无效")
+    tag = str(data.get("tag_name", "")).strip()
+    if parse_semantic_version(tag) is None:
+        raise AgentError("GitHub 最新版本号格式无效")
+    name = str(data.get("name") or tag).strip()[:200]
+    notes = str(data.get("body") or "")
+    if len(notes) > MAX_RELEASE_NOTES:
+        notes = notes[:MAX_RELEASE_NOTES].rstrip() + "\n\n[更新日志已截断]"
+    published_at = str(data.get("published_at") or data.get("created_at") or "").strip()[:80]
+    return {
+        "tag": tag,
+        "name": name or tag,
+        "url": f"{GITHUB_RELEASE_PAGE_PREFIX}{tag}",
+        "published_at": published_at,
+        "notes": notes,
+    }
 
 
 class AgentError(RuntimeError):
@@ -788,6 +903,9 @@ class OpenVPNController:
         self.update_service_name = self.config.get(
             "update_service_name", "openvpn-manager-update.service"
         )
+        self.update_check_path = pathlib.Path(
+            self.config.get("update_check_path", "/var/lib/openvpn-manager/update-check.json")
+        )
 
     def run(self, args: list[str], *, cwd: pathlib.Path | None = None, timeout: int = 120) -> str:
         environment = os.environ.copy()
@@ -953,7 +1071,8 @@ class OpenVPNController:
         state = completed.stdout.strip() or "unknown"
         online = self._read_status()
         try:
-            version_line = self.run(["openvpn", "--version"], timeout=15).splitlines()[0]
+            version_output = self.run(["openvpn", "--version"], timeout=15)
+            version_line = extract_openvpn_version(version_output) or version_output.splitlines()[0]
         except (AgentError, IndexError):
             version_line = "OpenVPN"
         return {
@@ -1413,10 +1532,130 @@ class OpenVPNController:
             status = {"state": "idle", "message": "尚未执行在线更新"}
         status["manager_version"] = self._manager_version()
         try:
-            status["openvpn_version"] = self.run(["openvpn", "--version"], timeout=15).splitlines()[0]
-        except (AgentError, IndexError):
+            output = self.run(["openvpn", "--version"], timeout=15)
+            status["openvpn_version"] = extract_openvpn_version(output) or "未知"
+        except AgentError:
             status["openvpn_version"] = "OpenVPN"
         return status
+
+    def _fetch_github_release(self) -> dict[str, Any]:
+        request = urllib.request.Request(
+            GITHUB_RELEASE_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "openvpn-web-manager-update-check",
+            },
+        )
+        context = ssl.create_default_context()
+        try:
+            with urllib.request.urlopen(request, timeout=12, context=context) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > MAX_RELEASE_BYTES:
+                    raise AgentError("GitHub 更新信息超过安全大小限制")
+                chunks: list[bytes] = []
+                total = 0
+                while True:
+                    chunk = response.read(32_768)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_RELEASE_BYTES:
+                        raise AgentError("GitHub 更新信息超过安全大小限制")
+                    chunks.append(chunk)
+        except AgentError:
+            raise
+        except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise AgentError(f"无法读取 GitHub 最新版本：{exc}") from exc
+        return parse_github_release(b"".join(chunks))
+
+    def _openvpn_versions(self) -> tuple[str | None, str | None, str | None]:
+        current = None
+        try:
+            current = extract_openvpn_version(self.run(["openvpn", "--version"], timeout=15))
+        except AgentError:
+            pass
+        installed = None
+        candidate = None
+        try:
+            installed, candidate = parse_apt_package_versions(
+                self.run(["apt-cache", "policy", "openvpn"], timeout=20)
+            )
+        except AgentError:
+            pass
+        return current or installed, installed, candidate
+
+    def _read_cached_update_check(
+        self, *, max_age_seconds: int | None = UPDATE_CHECK_TTL_SECONDS
+    ) -> dict[str, Any] | None:
+        try:
+            cached = load_json(self.update_check_path)
+        except AgentError:
+            return None
+        checked_at = cached.get("checked_at")
+        if not isinstance(checked_at, str):
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if (
+            max_age_seconds is not None
+            and (dt.datetime.now(dt.timezone.utc) - parsed).total_seconds() > max_age_seconds
+        ):
+            return None
+        return cached
+
+    def check_updates(self, *, force: bool = False) -> dict[str, Any]:
+        """Fetch manager/OpenVPN update metadata without changing runtime state."""
+        cached = None if force else self._read_cached_update_check()
+        if cached is not None:
+            return cached
+        manager_current = self._manager_version()
+        manager_current_normalized = manager_current.removeprefix("v")
+        try:
+            release = self._fetch_github_release()
+        except AgentError:
+            cached = self._read_cached_update_check(max_age_seconds=None)
+            if cached is not None:
+                fallback = dict(cached)
+                fallback["check_warning"] = "远程版本暂时无法访问，当前显示的是上次成功检查结果。"
+                return fallback
+            raise
+        latest_manager = release["tag"].removeprefix("v")
+        manager_available = False
+        if parse_semantic_version(manager_current_normalized) is not None:
+            manager_available = compare_semantic_versions(latest_manager, manager_current_normalized) > 0
+        current_openvpn, installed_openvpn, candidate_openvpn = self._openvpn_versions()
+        openvpn_available = bool(installed_openvpn and candidate_openvpn)
+        if openvpn_available:
+            try:
+                openvpn_available = subprocess.run(
+                    ["dpkg", "--compare-versions", installed_openvpn, "lt", candidate_openvpn],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=10,
+                ).returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                openvpn_available = installed_openvpn != candidate_openvpn
+        result = {
+            "current_manager_version": manager_current,
+            "latest_manager_version": release["tag"],
+            "current_openvpn_version": current_openvpn or "未知",
+            "installed_openvpn_version": installed_openvpn or current_openvpn or "未知",
+            "candidate_openvpn_version": candidate_openvpn or "暂无",
+            "manager_update_available": manager_available,
+            "openvpn_update_available": openvpn_available,
+            "update_available": manager_available or openvpn_available,
+            "release_name": release["name"],
+            "release_url": release["url"],
+            "release_published_at": release["published_at"],
+            "release_notes": release["notes"] or "本次发布没有填写更新日志。",
+            "checked_at": utc_now(),
+        }
+        self._atomic_json(self.update_check_path, result, mode=0o640, group_name=self.web_group)
+        return result
 
     def start_update(self) -> dict[str, Any]:
         completed = subprocess.run(
@@ -1429,6 +1668,10 @@ class OpenVPNController:
         )
         if completed.stdout.strip() in {"active", "activating"}:
             raise AgentError("更新任务正在运行，请勿重复提交")
+        try:
+            self.update_check_path.unlink()
+        except FileNotFoundError:
+            pass
         request = {"mode": "all", "requested_at": utc_now()}
         self._atomic_json(self.update_request_path, request, mode=0o600)
         self._atomic_json(
@@ -1496,6 +1739,8 @@ class OpenVPNController:
             return self.set_web_password(request.get("password_hash"))
         if action == "update_status":
             return self.update_status()
+        if action == "check_updates":
+            return self.check_updates(force=bool(request.get("force", False)))
         if action == "start_update":
             return self.start_update()
         if action == "sync_runtime":
@@ -1585,6 +1830,7 @@ def main() -> int:
             "client_logs",
             "sync_runtime",
             "update_status",
+            "check_updates",
             "start_update",
         ],
     )

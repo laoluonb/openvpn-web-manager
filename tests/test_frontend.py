@@ -25,6 +25,10 @@ class FrontendRegressionTests(unittest.TestCase):
             'id="profileDialog"',
             'id="networkDialog"',
             'id="updateButton"',
+            'id="checkUpdateButton"',
+            'id="updateDialog"',
+            'id="updateReleaseNotes"',
+            'id="updateReleasePublishedAt"',
             "允许其他 VPN 客户端访问",
         ):
             self.assertIn(marker, html)
@@ -32,6 +36,8 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn("viewProfile", javascript)
         self.assertIn('"/api/server/settings"', server)
         self.assertIn('"/api/update"', server)
+        self.assertIn('"/api/update/check"', server)
+        self.assertIn("/api/update/check", javascript)
         self.assertIn('r"/api/clients/([^/]+)/disconnect"', server)
         self.assertIn('r"/api/clients/([^/]+)/network"', server)
 
