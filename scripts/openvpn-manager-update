@@ -7,6 +7,7 @@ CONFIG_FILE="/etc/openvpn-manager/server.json"
 REQUEST_FILE="/var/lib/openvpn-manager/update-request.json"
 STATUS_FILE="/var/lib/openvpn-manager/update-status.json"
 LOCK_FILE="/run/openvpn-manager/update.lock"
+INSTALL_LOG="/var/log/openvpn-manager/update-install.log"
 REPOSITORY="laoluonb/openvpn-web-manager"
 WORK_DIR=""
 UPDATE_FINISHED="0"
@@ -67,7 +68,11 @@ on_error() {
 trap cleanup EXIT
 trap 'on_error "$?" "$LINENO"' ERR
 
-install -d -m 0750 -o root -g openvpn-web /run/openvpn-manager /var/lib/openvpn-manager
+install -d -m 0750 -o root -g openvpn-web \
+  /run/openvpn-manager /var/lib/openvpn-manager /var/log/openvpn-manager
+: >"$INSTALL_LOG"
+chown root:openvpn-web "$INSTALL_LOG"
+chmod 0640 "$INSTALL_LOG"
 systemd-tmpfiles --create /etc/tmpfiles.d/openvpn-manager.conf 2>/dev/null || true
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
@@ -139,6 +144,62 @@ if [[ -n "$CURRENT_VERSION" ]] && dpkg --compare-versions "${TARGET_VERSION#v}" 
   UPDATE_FINISHED="1"
   exit 1
 fi
+
+write_status "running" "正在刷新系统软件源并检查 OpenVPN 更新。" "$TARGET_VERSION"
+apt-get update -y 2>&1 | tee -a "$INSTALL_LOG"
+mapfile -t OPENVPN_PACKAGE_VERSIONS < <(python3 - <<'PY'
+import re
+import subprocess
+
+completed = subprocess.run(
+    ["apt-cache", "policy", "openvpn"],
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    check=False,
+)
+installed = ""
+candidate = ""
+for line in completed.stdout.splitlines():
+    match = re.match(r"^\s*(Installed|Candidate):\s*(\S+)\s*$", line)
+    if not match:
+        continue
+    if match.group(1) == "Installed":
+        installed = match.group(2)
+    else:
+        candidate = match.group(2)
+print(installed if installed != "(none)" else "")
+print(candidate if candidate != "(none)" else "")
+PY
+)
+OPENVPN_INSTALLED="${OPENVPN_PACKAGE_VERSIONS[0]:-}"
+OPENVPN_CANDIDATE="${OPENVPN_PACKAGE_VERSIONS[1]:-}"
+OPENVPN_UPDATE_AVAILABLE="0"
+if [[ -n "$OPENVPN_INSTALLED" && -n "$OPENVPN_CANDIDATE" ]] \
+  && dpkg --compare-versions "$OPENVPN_INSTALLED" lt "$OPENVPN_CANDIDATE"; then
+  OPENVPN_UPDATE_AVAILABLE="1"
+fi
+
+if [[ -n "$CURRENT_VERSION" ]] \
+  && dpkg --compare-versions "${TARGET_VERSION#v}" eq "$CURRENT_VERSION"; then
+  if [[ "$OPENVPN_UPDATE_AVAILABLE" != "1" ]]; then
+    UPDATE_FINISHED="1"
+    write_status "completed" "管理面板 $TARGET_VERSION 与 OpenVPN 均已是最新版本，无需重复安装；现有 VPN 端口和配置未作修改。" "$TARGET_VERSION"
+    exit 0
+  fi
+
+  write_status "running" "管理面板已是 $TARGET_VERSION，正在单独升级 OpenVPN 软件包。" "$TARGET_VERSION"
+  if apt-get install -y --only-upgrade openvpn 2>&1 | tee -a "$INSTALL_LOG"; then
+    UPDATE_FINISHED="1"
+    write_status "completed" "OpenVPN 已从 $OPENVPN_INSTALLED 更新到 $OPENVPN_CANDIDATE；管理面板、VPN 端口和现有配置保持不变。" "$TARGET_VERSION"
+    exit 0
+  else
+    INSTALL_EXIT_CODE=${PIPESTATUS[0]}
+    FAILURE_DETAIL="$(tail -n 12 "$INSTALL_LOG" 2>/dev/null | sed '/^[[:space:]]*$/d' | tr '\n' ' ' | cut -c1-1200)"
+    exit "$INSTALL_EXIT_CODE"
+  fi
+fi
+
 write_status "running" "正在下载管理面板 $TARGET_VERSION。" "$TARGET_VERSION"
 
 curl --proto '=https' --tlsv1.2 -fsSL \
@@ -170,14 +231,14 @@ SOURCE_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d -print -quit)"
 }
 
 write_status "running" "正在备份配置、升级 OpenVPN 并安装管理面板 $TARGET_VERSION。" "$TARGET_VERSION"
-INSTALL_LOG="$WORK_DIR/install.log"
-set +e
-/bin/bash "$SOURCE_DIR/install.sh" \
-  --existing-action preserve 2>&1 | tee "$INSTALL_LOG"
-INSTALL_EXIT_CODE=${PIPESTATUS[0]}
-set -e
+if OPENVPN_MANAGER_UPDATE=1 /bin/bash "$SOURCE_DIR/install.sh" \
+  --existing-action preserve 2>&1 | tee -a "$INSTALL_LOG"; then
+  INSTALL_EXIT_CODE=0
+else
+  INSTALL_EXIT_CODE=${PIPESTATUS[0]}
+fi
 if ((INSTALL_EXIT_CODE != 0)); then
-  FAILURE_DETAIL="$(tail -n 8 "$INSTALL_LOG" 2>/dev/null | sed '/^[[:space:]]*$/d' | tr '\n' ' ' | cut -c1-900)"
+  FAILURE_DETAIL="$(tail -n 12 "$INSTALL_LOG" 2>/dev/null | sed '/^[[:space:]]*$/d' | tr '\n' ' ' | cut -c1-1200)"
   exit "$INSTALL_EXIT_CODE"
 fi
 

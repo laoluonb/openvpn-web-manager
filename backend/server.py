@@ -204,22 +204,22 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.11-demo",
+            "manager_version": "1.2.12-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.update_check = {
-            "current_manager_version": "1.2.11-demo",
-            "latest_manager_version": "v1.2.11-demo",
+            "current_manager_version": "1.2.12-demo",
+            "latest_manager_version": "v1.2.12-demo",
             "current_openvpn_version": "2.6 demo",
             "installed_openvpn_version": "2.6 demo",
             "candidate_openvpn_version": "2.6 demo",
             "manager_update_available": False,
             "openvpn_update_available": False,
             "update_available": False,
-            "release_name": "v1.2.11：更新不再改变 VPN 端口",
-            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.11",
+            "release_name": "v1.2.12：修复重复更新与错误诊断",
+            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.12",
             "release_published_at": "2026-09-12T00:00:00Z",
-            "release_notes": "一键更新改为只执行保留配置的升级流程，不再重新传入或随机化 VPN 端口。\n修复异常版本字符串触发 dpkg 报错的问题，并继续保留 VPN 端口和服务端参数。",
+            "release_notes": "当前已经是最新版时不再重复执行安装器。\nOpenVPN 单独有更新时只升级软件包，并将完整更新日志保存在固定路径。",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         self.clients = [

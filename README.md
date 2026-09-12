@@ -14,6 +14,7 @@ OpenVPN 服务端、路由转发、防火墙、HTTPS 反向代理、首个客户
 - **爱快 iKuai 友好**：点击客户端名称即可查看完整配置，并逐项复制 CA、客户端证书、私钥和 `tls-crypt` 密钥。
 - **客户端下级内网**：为爱快、软路由或分支网关配置 LAN CIDR，可选择仅服务端访问或允许其他 VPN 客户端访问。
 - **一键在线更新**：从本项目 GitHub 最新稳定 Release 更新面板，并通过系统软件源升级 OpenVPN。
+- **避免重复重装**：面板与 OpenVPN 均为最新版时直接结束；只有 OpenVPN 有更新时仅升级对应软件包。
 - **全中文现代界面**：响应式布局、深浅色主题，无前端框架和 CDN 依赖。
 - **轻量运行**：后端仅使用 Python 标准库。
 - **权限隔离**：Web 服务以普通用户运行，PKI 和系统操作由受限 Unix 套接字后的 root 代理执行。
@@ -218,6 +219,7 @@ OpenWrt 日志中若能看到 `Initialization Sequence Completed`，且可以访
 
 ```bash
 journalctl -u openvpn-manager-update.service -n 200 --no-pager
+cat /var/log/openvpn-manager/update-install.log
 ```
 
 ## 命令行管理
