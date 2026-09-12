@@ -9,7 +9,7 @@ OpenVPN 服务端、路由转发、防火墙、HTTPS 反向代理、首个客户
 
 - **一键安装**：支持 Debian 12/13、Ubuntu 22.04/24.04 及更新版本；首次或全新安装自动选择随机 VPN 端口。
 - **安全升级/修复**：重复执行安装器时自动备份并保留 CA、客户端、密码和未显式覆盖的服务端参数，包括当前 VPN 端口。
-- **服务端可视化配置**：在 Web 页面修改公网地址、端口、UDP/TCP、VPN 子网、DNS、全流量转发和最大连接数。
+- **服务端可视化配置**：在 Web 页面修改公网地址、端口、UDP/TCP、VPN 子网、DNS、全流量转发、最大连接数，以及 MTU、MSS、Keepalive、加密、日志、控制台来源和推送路由。
 - **客户端全生命周期**：创建、查看、复制、下载、踢出在线连接和吊销 `.ovpn` 配置。
 - **爱快 iKuai 友好**：点击客户端名称即可查看完整配置，并逐项复制 CA、客户端证书、私钥和 `tls-crypt` 密钥。
 - **客户端下级内网**：为爱快、软路由或分支网关配置 LAN CIDR，可选择仅服务端访问或允许其他 VPN 客户端访问。
@@ -65,6 +65,14 @@ sudo ./install.sh --endpoint vpn.example.com
 --dns-servers LIST       推送的 DNS，逗号分隔，默认 1.1.1.1,9.9.9.9
 --redirect-gateway MODE  是否让客户端全部流量经过 VPN：yes 或 no
 --max-clients COUNT      最大并发客户端数，默认 100
+--tun-mtu MTU            TUN MTU，默认 1500
+--mssfix MTU             MSS Fix，0 表示关闭，默认 1450
+--keepalive-ping SEC     Keepalive 检测间隔，默认 10
+--keepalive-timeout SEC  Keepalive 超时，默认 120
+--data-cipher CIPHER     首选数据加密：AES-256-GCM、AES-128-GCM 或 CHACHA20-POLY1305
+--auth-digest DIGEST     HMAC 摘要：SHA256、SHA384 或 SHA512，默认 SHA256
+--log-verb LEVEL         OpenVPN 日志等级 0-11，默认 3
+--push-routes LIST       推送给客户端的私有 CIDR，逗号或空格分隔
 --web-port PORT          HTTPS 管理端口，默认 8443
 --web-allow CIDR         允许访问控制台的来源，默认 0.0.0.0/0
 --admin-user USER        控制台用户名，默认 admin
@@ -130,7 +138,14 @@ sudo ./install.sh --existing-action abort
 - VPN 私有地址池；
 - 推送给客户端的 DNS；
 - 是否将客户端全部流量转发到 VPN；
-- 最大并发客户端数。
+- 最大并发客户端数；
+- 控制台允许来源（IPv4 CIDR）；
+- 高级网络参数：TUN MTU、MSS Fix、Keepalive 检测间隔/超时、首选数据加密、HMAC 摘要和日志等级；
+- 自定义私有推送路由，每行一个 CIDR。
+
+首次使用建议保持默认值：TUN MTU `1500`、MSS Fix `1450`、Keepalive `10/120`、
+AES-256-GCM、SHA256 和日志等级 `3`。自定义推送路由只适用于需要让所有客户端访问的公共私网；
+爱快等分支客户端自己的 LAN，应在客户端行的“配置下级内网”中填写，并按需打开“允许其他 VPN 客户端访问”。
 
 保存后会验证网段冲突、重新生成 `server.conf` 和全部有效客户端配置、同步防火墙，并重启
 OpenVPN。VPN 子网变化时会清理旧地址池记录，避免客户端继续取得旧网段地址。
@@ -141,12 +156,16 @@ OpenVPN。VPN 子网变化时会清理旧地址池记录，避免客户端继续
 
 在“客户端”页面点击客户端名称或“查看”图标，即可打开配置查看器：
 
-1. 显示拨号名称、服务器地址、端口、UDP/TCP 和认证方式；
+1. 显示拨号名称、服务器地址、端口、线路、UDP/TCP、TUN、加密算法、LZO、MTU 和认证方式；
 2. 显示完整 `.ovpn` 内容，可一键复制或下载；
-3. 单独显示 CA 证书、客户端证书、客户端私钥和 `tls-crypt` 静态密钥，可逐项复制。
+3. 显示附加配置、服务器路由推送、添加路由、定时重拨和线路检测建议，可一键复制完整填写清单；
+4. 单独显示 CA 证书、客户端证书、客户端私钥和 `tls-crypt` 静态密钥，可逐项复制。
 
-在爱快添加 OpenVPN 时，认证方式选择 **静态密钥（tls-crypt）**，再复制页面显示的对应参数。
-不同爱快版本的字段名称可能略有差异。配置页面包含客户端私钥，只应在可信管理设备上打开。
+在爱快添加 OpenVPN 时，按配置查看器中的“爱快填写顺序”操作：线路选“自动”、隧道类型选 `TUN`、
+LZO 压缩关闭、MTU 使用页面值，认证方式选择 **静态密钥（tls-crypt）**，然后分别复制 CA、客户端证书、
+客户端私钥和 `tls-crypt` 静态密钥。服务器路由推送通常启用，添加路由通常留空；只有爱快版本不接受推送时，
+才把页面给出的 CIDR 一行一条手动填写。不同爱快版本的字段名称可能略有差异。配置页面包含客户端私钥，
+只应在可信管理设备上打开。
 
 ![爱快 iKuai 配置查看器](docs/ikuai-profile.png)
 
@@ -209,7 +228,6 @@ sudo openvpn-managerctl create alice-phone
 # 分支客户端：仅服务端可访问其 LAN
 sudo openvpn-managerctl create branch-a --lan-subnet 192.168.50.0/24
 
-# 修改为允许其他 VPN 客户端访问
 sudo openvpn-managerctl network branch-a 192.168.50.0/24 --share-lan
 
 # 移除下级内网设置

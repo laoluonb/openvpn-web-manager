@@ -173,6 +173,14 @@ values = [
     ",".join(data.get("dns_servers", ["1.1.1.1", "9.9.9.9"])),
     "yes" if data.get("redirect_gateway", True) else "no",
     data.get("max_clients", 100),
+    data.get("tun_mtu", 1500),
+    data.get("mssfix", 1450),
+    data.get("keepalive_ping", 10),
+    data.get("keepalive_timeout", 120),
+    data.get("data_cipher", "AES-256-GCM"),
+    data.get("auth_digest", "SHA256"),
+    data.get("log_verb", 3),
+    " ".join(data.get("push_routes", [])),
 ]
 for value in values:
     print(value)
@@ -190,7 +198,15 @@ bash "$SOURCE_DIR/install.sh" \
   --vpn-subnet "${SETTINGS[5]}" \
   --dns-servers "${SETTINGS[6]}" \
   --redirect-gateway "${SETTINGS[7]}" \
-  --max-clients "${SETTINGS[8]}"
+  --max-clients "${SETTINGS[8]}" \
+  --tun-mtu "${SETTINGS[9]}" \
+  --mssfix "${SETTINGS[10]}" \
+  --keepalive-ping "${SETTINGS[11]}" \
+  --keepalive-timeout "${SETTINGS[12]}" \
+  --data-cipher "${SETTINGS[13]}" \
+  --auth-digest "${SETTINGS[14]}" \
+  --log-verb "${SETTINGS[15]}" \
+  --push-routes "${SETTINGS[16]}"
 
 UPDATE_FINISHED="1"
 write_status "completed" "管理面板与 OpenVPN 已更新完成，现有 VPN 端口和服务端参数保持不变。" "$TARGET_VERSION"

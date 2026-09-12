@@ -187,11 +187,19 @@ class DemoAgent:
             "max_clients": 100,
             "web_port": 9090,
             "web_allow": "127.0.0.1/32",
+            "tun_mtu": 1500,
+            "mssfix": 1450,
+            "keepalive_ping": 10,
+            "keepalive_timeout": 120,
+            "data_cipher": "AES-256-GCM",
+            "auth_digest": "SHA256",
+            "log_verb": 3,
+            "push_routes": [],
         }
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.2-demo",
+            "manager_version": "1.2.5-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.clients = [
@@ -251,7 +259,7 @@ class DemoAgent:
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
             **self.settings,
-            "manager_version": "1.2.2-demo",
+            "manager_version": "1.2.5-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -346,6 +354,16 @@ DEMO-TLS-CRYPT
                         "server": self.settings["endpoint"],
                         "port": self.settings["vpn_port"],
                         "protocol": self.settings["vpn_protocol"].upper(),
+                        "line": "自动",
+                        "tunnel_type": "TUN",
+                        "cipher": self.settings["data_cipher"],
+                        "compression": "关闭",
+                        "mtu": self.settings["tun_mtu"],
+                        "additional_config": "tun-mtu 1500\nmssfix 1450\nauth-nocache\nmute-replay-warnings\nnobind",
+                        "server_route_push": True,
+                        "routes": "",
+                        "redial": False,
+                        "line_check": "使用爱快默认值",
                         "authentication": "静态密钥（tls-crypt）",
                         "ca_certificate": "-----BEGIN CERTIFICATE-----\nDEMO-CA\n-----END CERTIFICATE-----\n",
                         "client_certificate": "-----BEGIN CERTIFICATE-----\nDEMO-CLIENT\n-----END CERTIFICATE-----\n",
@@ -359,7 +377,12 @@ DEMO-TLS-CRYPT
                 requested = payload.get("settings")
                 if not isinstance(requested, dict):
                     raise APIError("服务端设置无效")
-                for key in ("endpoint", "vpn_port", "vpn_protocol", "vpn_subnet", "dns_servers", "redirect_gateway", "max_clients"):
+                for key in (
+                    "endpoint", "vpn_port", "vpn_protocol", "vpn_subnet", "dns_servers",
+                    "redirect_gateway", "max_clients", "web_allow", "tun_mtu", "mssfix",
+                    "keepalive_ping", "keepalive_timeout", "data_cipher", "auth_digest",
+                    "log_verb", "push_routes",
+                ):
                     if key in requested:
                         self.settings[key] = requested[key]
                 return {"settings": dict(self.settings), "status": self._status()}
@@ -386,9 +409,9 @@ DEMO-TLS-CRYPT
                 self.update_state = {
                     "state": "completed",
                     "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
-                    "manager_version": "1.2.2-demo",
+                    "manager_version": "1.2.5-demo",
                     "openvpn_version": "OpenVPN 2.6 demo",
-                    "target_version": "v1.2.2-demo",
+                    "target_version": "v1.2.5-demo",
                 }
                 return dict(self.update_state)
             raise APIError("不支持此演示操作")

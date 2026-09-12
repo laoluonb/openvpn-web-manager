@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.4"
+VERSION="1.2.5"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -18,6 +18,14 @@ VPN_PROTOCOL="udp"
 DNS_SERVERS="1.1.1.1,9.9.9.9"
 REDIRECT_GATEWAY="yes"
 MAX_CLIENTS="100"
+TUN_MTU="1500"
+MSSFIX="1450"
+KEEPALIVE_PING="10"
+KEEPALIVE_TIMEOUT="120"
+DATA_CIPHER="AES-256-GCM"
+AUTH_DIGEST="SHA256"
+LOG_VERB="3"
+PUSH_ROUTES=""
 OLD_VPN_PORT=""
 OLD_VPN_SUBNET=""
 
@@ -43,6 +51,14 @@ VPN_SUBNET_EXPLICIT="0"
 DNS_SERVERS_EXPLICIT="0"
 REDIRECT_GATEWAY_EXPLICIT="0"
 MAX_CLIENTS_EXPLICIT="0"
+TUN_MTU_EXPLICIT="0"
+MSSFIX_EXPLICIT="0"
+KEEPALIVE_PING_EXPLICIT="0"
+KEEPALIVE_TIMEOUT_EXPLICIT="0"
+DATA_CIPHER_EXPLICIT="0"
+AUTH_DIGEST_EXPLICIT="0"
+LOG_VERB_EXPLICIT="0"
+PUSH_ROUTES_EXPLICIT="0"
 WEB_PORT_EXPLICIT="0"
 WEB_ALLOW_EXPLICIT="0"
 
@@ -62,6 +78,14 @@ OpenVPN 管理中心安装器
   --dns-servers LIST       推送的 DNS，逗号分隔（默认：1.1.1.1,9.9.9.9）
   --redirect-gateway MODE  是否转发客户端全部流量：yes 或 no（默认：yes）
   --max-clients COUNT      最大并发客户端数（默认：100）
+  --tun-mtu MTU            TUN MTU（默认：1500）
+  --mssfix MTU             MSS Fix，0 表示关闭（默认：1450）
+  --keepalive-ping SEC     Keepalive 检测间隔（默认：10）
+  --keepalive-timeout SEC  Keepalive 超时（默认：120）
+  --data-cipher CIPHER     首选数据加密：AES-256-GCM、AES-128-GCM 或 CHACHA20-POLY1305
+  --auth-digest DIGEST     HMAC 摘要：SHA256、SHA384 或 SHA512（默认：SHA256）
+  --log-verb LEVEL         OpenVPN 日志等级 0-11（默认：3）
+  --push-routes LIST       推送给客户端的私有 CIDR，逗号或空格分隔
   --web-port PORT          HTTPS 管理端口（默认：8443）
   --web-allow CIDR         允许访问控制台的来源（默认：0.0.0.0/0）
   --admin-user USER        控制台用户名（默认：admin）
@@ -88,6 +112,14 @@ while (($#)); do
     --dns-servers) DNS_SERVERS="${2:-}"; DNS_SERVERS_EXPLICIT="1"; shift 2 ;;
     --redirect-gateway) REDIRECT_GATEWAY="${2:-}"; REDIRECT_GATEWAY_EXPLICIT="1"; shift 2 ;;
     --max-clients) MAX_CLIENTS="${2:-}"; MAX_CLIENTS_EXPLICIT="1"; shift 2 ;;
+    --tun-mtu) TUN_MTU="${2:-}"; TUN_MTU_EXPLICIT="1"; shift 2 ;;
+    --mssfix) MSSFIX="${2:-}"; MSSFIX_EXPLICIT="1"; shift 2 ;;
+    --keepalive-ping) KEEPALIVE_PING="${2:-}"; KEEPALIVE_PING_EXPLICIT="1"; shift 2 ;;
+    --keepalive-timeout) KEEPALIVE_TIMEOUT="${2:-}"; KEEPALIVE_TIMEOUT_EXPLICIT="1"; shift 2 ;;
+    --data-cipher) DATA_CIPHER="${2:-}"; DATA_CIPHER_EXPLICIT="1"; shift 2 ;;
+    --auth-digest) AUTH_DIGEST="${2:-}"; AUTH_DIGEST_EXPLICIT="1"; shift 2 ;;
+    --log-verb) LOG_VERB="${2:-}"; LOG_VERB_EXPLICIT="1"; shift 2 ;;
+    --push-routes) PUSH_ROUTES="${2:-}"; PUSH_ROUTES_EXPLICIT="1"; shift 2 ;;
     --web-port) WEB_PORT="${2:-}"; WEB_PORT_EXPLICIT="1"; shift 2 ;;
     --web-allow) WEB_ALLOW="${2:-}"; WEB_ALLOW_EXPLICIT="1"; shift 2 ;;
     --admin-user) ADMIN_USER="${2:-}"; shift 2 ;;
@@ -129,6 +161,30 @@ validate_options() {
   esac
   if [[ ! "$MAX_CLIENTS" =~ ^[0-9]+$ ]] || ((MAX_CLIENTS < 1 || MAX_CLIENTS > 1000)); then
     die "--max-clients 必须是 1 到 1000 的整数。"
+  fi
+  if [[ ! "$TUN_MTU" =~ ^[0-9]+$ ]] || ((TUN_MTU < 576 || TUN_MTU > 65535)); then
+    die "--tun-mtu 必须是 576 到 65535 的整数。"
+  fi
+  if [[ ! "$MSSFIX" =~ ^[0-9]+$ ]] || ((MSSFIX < 0 || MSSFIX > 65535)); then
+    die "--mssfix 必须是 0 到 65535 的整数。"
+  fi
+  if [[ ! "$KEEPALIVE_PING" =~ ^[0-9]+$ ]] || ((KEEPALIVE_PING < 1 || KEEPALIVE_PING > 3600)); then
+    die "--keepalive-ping 必须是 1 到 3600 的整数。"
+  fi
+  if [[ ! "$KEEPALIVE_TIMEOUT" =~ ^[0-9]+$ ]] || ((KEEPALIVE_TIMEOUT < 2 || KEEPALIVE_TIMEOUT > 86400)); then
+    die "--keepalive-timeout 必须是 2 到 86400 的整数。"
+  fi
+  ((KEEPALIVE_TIMEOUT > KEEPALIVE_PING)) || die "--keepalive-timeout 必须大于 --keepalive-ping。"
+  case "${DATA_CIPHER^^}" in
+    AES-256-GCM|AES-128-GCM|CHACHA20-POLY1305) DATA_CIPHER="${DATA_CIPHER^^}" ;;
+    *) die "--data-cipher 只能是 AES-256-GCM、AES-128-GCM 或 CHACHA20-POLY1305。" ;;
+  esac
+  case "${AUTH_DIGEST^^}" in
+    SHA256|SHA384|SHA512) AUTH_DIGEST="${AUTH_DIGEST^^}" ;;
+    *) die "--auth-digest 只能是 SHA256、SHA384 或 SHA512。" ;;
+  esac
+  if [[ ! "$LOG_VERB" =~ ^[0-9]+$ ]] || ((LOG_VERB < 0 || LOG_VERB > 11)); then
+    die "--log-verb 必须是 0 到 11 的整数。"
   fi
   [[ "$ADMIN_USER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$ ]] || die "管理员用户名无效。"
   [[ "$INITIAL_CLIENT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$ ]] || die "首个客户端名称无效。"
@@ -393,9 +449,17 @@ print("yes" if data.get("redirect_gateway", True) else "no")
 print(data.get("max_clients", 100))
 print(data.get("web_port", 8443))
 print(data.get("web_allow", "0.0.0.0/0"))
+print(data.get("tun_mtu", 1500))
+print(data.get("mssfix", 1450) if data.get("mssfix", 1450) not in (None, "") else 0)
+print(data.get("keepalive_ping", 10))
+print(data.get("keepalive_timeout", 120))
+print(data.get("data_cipher", "AES-256-GCM"))
+print(data.get("auth_digest", "SHA256"))
+print(data.get("log_verb", 3))
+print(" ".join(data.get("push_routes", [])))
 PY
   ) || die "无法读取已有服务端设置：$source"
-  ((${#values[@]} == 9)) || die "已有服务端设置内容不完整：$source"
+  ((${#values[@]} == 17)) || die "已有服务端设置内容不完整：$source"
 
   OLD_VPN_SUBNET="${values[3]}"
   OLD_VPN_PORT="${values[1]}"
@@ -408,6 +472,14 @@ PY
   [[ "$MAX_CLIENTS_EXPLICIT" == "1" ]] || MAX_CLIENTS="${values[6]}"
   [[ "$WEB_PORT_EXPLICIT" == "1" ]] || WEB_PORT="${values[7]}"
   [[ "$WEB_ALLOW_EXPLICIT" == "1" ]] || WEB_ALLOW="${values[8]}"
+  [[ "$TUN_MTU_EXPLICIT" == "1" ]] || TUN_MTU="${values[9]}"
+  [[ "$MSSFIX_EXPLICIT" == "1" ]] || MSSFIX="${values[10]}"
+  [[ "$KEEPALIVE_PING_EXPLICIT" == "1" ]] || KEEPALIVE_PING="${values[11]}"
+  [[ "$KEEPALIVE_TIMEOUT_EXPLICIT" == "1" ]] || KEEPALIVE_TIMEOUT="${values[12]}"
+  [[ "$DATA_CIPHER_EXPLICIT" == "1" ]] || DATA_CIPHER="${values[13]}"
+  [[ "$AUTH_DIGEST_EXPLICIT" == "1" ]] || AUTH_DIGEST="${values[14]}"
+  [[ "$LOG_VERB_EXPLICIT" == "1" ]] || LOG_VERB="${values[15]}"
+  [[ "$PUSH_ROUTES_EXPLICIT" == "1" ]] || PUSH_ROUTES="${values[16]}"
   log "已载入并保留现有服务端参数，包括当前 VPN 端口；命令行显式参数仍具有最高优先级"
 }
 
@@ -487,6 +559,30 @@ PY
 )" || die "--vpn-subnet 或 --dns-servers 无效。"
 IFS=$'\t' read -r VPN_SUBNET DNS_SERVERS <<<"$VALIDATED_NETWORK_SETTINGS"
 
+VALIDATED_PUSH_ROUTES="$(python3 - "$VPN_SUBNET" "$PUSH_ROUTES" <<'PY'
+import ipaddress, re, sys
+
+private = tuple(ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+vpn = ipaddress.ip_network(sys.argv[1], strict=False)
+routes = []
+for raw in re.split(r"[\s,]+", sys.argv[2].strip()):
+    if not raw:
+        continue
+    network = ipaddress.ip_network(raw, strict=False)
+    if network.version != 4 or network.prefixlen < 8 or network.prefixlen > 32:
+        raise SystemExit(f"自定义推送路由必须是 /8 到 /32 的 IPv4 私有网段：{raw}")
+    if not any(network.subnet_of(item) for item in private):
+        raise SystemExit(f"自定义推送路由必须使用 RFC1918 私有地址：{raw}")
+    if network.overlaps(vpn):
+        raise SystemExit(f"自定义推送路由不能与 VPN 子网 {vpn.with_prefixlen} 重叠：{raw}")
+    if any(network.overlaps(existing) for existing in routes):
+        raise SystemExit(f"自定义推送路由之间不能重叠：{raw}")
+    routes.append(network)
+print(" ".join(item.with_prefixlen for item in routes))
+PY
+)" || die "--push-routes 无效。"
+PUSH_ROUTES="$VALIDATED_PUSH_ROUTES"
+
 if [[ -z "$ENDPOINT" ]]; then
   ENDPOINT="$(curl -4fsS --max-time 8 https://api.ipify.org 2>/dev/null || true)"
   if [[ ! "$ENDPOINT" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -550,7 +646,7 @@ if [[ ! -f "$OPENVPN_DIR/tls-crypt.key" ]]; then
 fi
 chmod 0600 "$OPENVPN_DIR/tls-crypt.key"
 
-python3 - "$CONFIG_DIR/server.json" "$ENDPOINT" "$VPN_PORT" "$VPN_PROTOCOL" "$WEB_PORT" "$WEB_ALLOW" "$PUBLIC_INTERFACE" "$VPN_SUBNET" "$DNS_SERVERS" "$REDIRECT_GATEWAY" "$MAX_CLIENTS" "$WEB_GROUP" <<'PY'
+python3 - "$CONFIG_DIR/server.json" "$ENDPOINT" "$VPN_PORT" "$VPN_PROTOCOL" "$WEB_PORT" "$WEB_ALLOW" "$PUBLIC_INTERFACE" "$VPN_SUBNET" "$DNS_SERVERS" "$REDIRECT_GATEWAY" "$MAX_CLIENTS" "$TUN_MTU" "$MSSFIX" "$KEEPALIVE_PING" "$KEEPALIVE_TIMEOUT" "$DATA_CIPHER" "$AUTH_DIGEST" "$LOG_VERB" "$PUSH_ROUTES" "$WEB_GROUP" <<'PY'
 import json, pathlib, sys
 (
     path,
@@ -564,6 +660,14 @@ import json, pathlib, sys
     dns_servers,
     redirect_gateway,
     max_clients,
+    tun_mtu,
+    mssfix,
+    keepalive_ping,
+    keepalive_timeout,
+    data_cipher,
+    auth_digest,
+    log_verb,
+    push_routes,
     web_group,
 ) = sys.argv[1:]
 data = {
@@ -577,6 +681,14 @@ data = {
     "dns_servers": [item for item in dns_servers.split(",") if item],
     "redirect_gateway": redirect_gateway == "yes",
     "max_clients": int(max_clients),
+    "tun_mtu": int(tun_mtu),
+    "mssfix": int(mssfix),
+    "keepalive_ping": int(keepalive_ping),
+    "keepalive_timeout": int(keepalive_timeout),
+    "data_cipher": data_cipher,
+    "auth_digest": auth_digest,
+    "log_verb": int(log_verb),
+    "push_routes": [item for item in push_routes.replace(",", " ").split() if item],
     "server_name": "server",
     "easy_rsa_dir": "/etc/openvpn/server/easy-rsa",
     "openvpn_dir": "/etc/openvpn/server",

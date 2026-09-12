@@ -238,6 +238,15 @@ function renderServerForm(status) {
   byId("serverDns1").value = dns[0] || "";
   byId("serverDns2").value = dns[1] || "";
   byId("serverMaxClients").value = status.max_clients || 100;
+  byId("serverWebAllow").value = status.web_allow || "0.0.0.0/0";
+  byId("serverTunMtu").value = status.tun_mtu || 1500;
+  byId("serverMssfix").value = status.mssfix ?? 1450;
+  byId("serverKeepalivePing").value = status.keepalive_ping || 10;
+  byId("serverKeepaliveTimeout").value = status.keepalive_timeout || 120;
+  byId("serverDataCipher").value = status.data_cipher || "AES-256-GCM";
+  byId("serverAuthDigest").value = status.auth_digest || "SHA256";
+  byId("serverLogVerb").value = String(status.log_verb ?? 3);
+  byId("serverPushRoutes").value = (status.push_routes || []).join("\n");
   byId("serverRedirectGateway").checked = status.redirect_gateway !== false;
   byId("serverWebPort").textContent = `HTTPS :${status.web_port}`;
 }
@@ -430,7 +439,16 @@ function renderProfile(profile) {
   byId("ikuaiServer").textContent = ikuai.server || "—";
   byId("ikuaiPort").textContent = ikuai.port || "—";
   byId("ikuaiProtocol").textContent = ikuai.protocol || "—";
+  byId("ikuaiLine").textContent = ikuai.line || "自动";
+  byId("ikuaiTunnelType").textContent = ikuai.tunnel_type || "TUN";
+  byId("ikuaiCipher").textContent = ikuai.cipher || "AES-256-GCM";
+  byId("ikuaiCompression").textContent = ikuai.compression || "关闭";
+  byId("ikuaiMtu").textContent = ikuai.mtu || "1500";
   byId("ikuaiAuthentication").textContent = ikuai.authentication || "静态密钥（tls-crypt）";
+  byId("ikuaiAdditionalConfig").textContent = ikuai.additional_config || "—";
+  byId("ikuaiRoutes").textContent = ikuai.routes || "通常留空（由服务器路由推送）";
+  byId("ikuaiRoutePush").textContent = ikuai.server_route_push === false ? "关闭" : "启用";
+  byId("ikuaiRedial").textContent = `${ikuai.redial ? "启用" : "关闭"} / ${ikuai.line_check || "使用爱快默认值"}`;
   byId("ikuaiCaCertificate").textContent = ikuai.ca_certificate || "—";
   byId("ikuaiClientCertificate").textContent = ikuai.client_certificate || "—";
   byId("ikuaiPrivateKey").textContent = ikuai.private_key || "—";
@@ -447,7 +465,16 @@ async function viewProfile(name) {
     "ikuaiServer",
     "ikuaiPort",
     "ikuaiProtocol",
+    "ikuaiLine",
+    "ikuaiTunnelType",
+    "ikuaiCipher",
+    "ikuaiCompression",
+    "ikuaiMtu",
     "ikuaiAuthentication",
+    "ikuaiAdditionalConfig",
+    "ikuaiRoutes",
+    "ikuaiRoutePush",
+    "ikuaiRedial",
     "ikuaiCaCertificate",
     "ikuaiClientCertificate",
     "ikuaiPrivateKey",
@@ -484,7 +511,38 @@ async function copyText(value, successMessage = "内容已复制到剪贴板。"
 function copyProfileField(field) {
   if (!state.profile) return;
   const value = state.profile.ikuai?.[field];
+  if (field === "routes" && !value) {
+    toast("当前无需添加路由", "服务器路由推送已覆盖可用路由，请在爱快中保持此项留空。", "success");
+    return;
+  }
   copyText(value, "爱快参数已复制。" ).catch((err) => toast("复制失败", err.message, "error"));
+}
+
+function buildIkuaiChecklist() {
+  const ikuai = state.profile?.ikuai || {};
+  const lines = [
+    `拨号名称：${ikuai.dial_name || ""}`,
+    `服务器地址/域名：${ikuai.server || ""}`,
+    `服务器端口：${ikuai.port || ""}`,
+    "认证方式：静态密钥（tls-crypt）",
+    `线路：${ikuai.line || "自动"}`,
+    `隧道协议：${ikuai.protocol || ""}`,
+    `隧道类型：${ikuai.tunnel_type || "TUN"}`,
+    `加密算法：${ikuai.cipher || "AES-256-GCM"}`,
+    `LZO 压缩：${ikuai.compression || "关闭"}`,
+    `MTU：${ikuai.mtu || "1500"}`,
+    "",
+    "附加配置：",
+    ikuai.additional_config || "",
+    "",
+    `服务器路由推送：${ikuai.server_route_push === false ? "关闭" : "启用"}`,
+    `添加路由：${ikuai.routes || "留空"}`,
+    `定时重拨：${ikuai.redial ? "启用" : "关闭"}`,
+    `线路检测：${ikuai.line_check || "使用爱快默认值"}`,
+    "",
+    "证书与密钥请分别复制页面下方的 CA 证书、客户端证书、客户端私钥和 tls-crypt 静态密钥。",
+  ];
+  return lines.join("\n");
 }
 
 function openNetworkDialog(client) {
@@ -585,6 +643,15 @@ function submitServerSettings(event) {
     dns_servers: dnsServers,
     redirect_gateway: byId("serverRedirectGateway").checked,
     max_clients: Number(byId("serverMaxClients").value),
+    web_allow: byId("serverWebAllow").value.trim(),
+    tun_mtu: Number(byId("serverTunMtu").value),
+    mssfix: Number(byId("serverMssfix").value),
+    keepalive_ping: Number(byId("serverKeepalivePing").value),
+    keepalive_timeout: Number(byId("serverKeepaliveTimeout").value),
+    data_cipher: byId("serverDataCipher").value,
+    auth_digest: byId("serverAuthDigest").value,
+    log_verb: Number(byId("serverLogVerb").value),
+    push_routes: byId("serverPushRoutes").value.split(/[,\n\s]+/).map((item) => item.trim()).filter(Boolean),
   };
   byId("serverFormError").textContent = "";
   showConfirm({
@@ -756,6 +823,9 @@ function bindEvents() {
   });
   byId("downloadProfileButton").addEventListener("click", () => {
     if (state.profile?.name) downloadProfile(state.profile.name);
+  });
+  byId("copyIkuaiChecklistButton").addEventListener("click", () => {
+    copyText(buildIkuaiChecklist(), "完整爱快填写清单已复制。" ).catch((err) => toast("复制失败", err.message, "error"));
   });
   document.querySelectorAll("[data-profile-field]").forEach((button) => button.addEventListener("click", () => copyProfileField(button.dataset.profileField)));
   byId("confirmCancel").addEventListener("click", () => closeDialog("confirmDialog"));

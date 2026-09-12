@@ -46,6 +46,8 @@ MUTATION_LOCK = threading.Lock()
 PRIVATE_V4_NETWORKS = tuple(
     ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
+SUPPORTED_DATA_CIPHERS = ("AES-256-GCM", "AES-128-GCM", "CHACHA20-POLY1305")
+SUPPORTED_AUTH_DIGESTS = ("SHA256", "SHA384", "SHA512")
 
 
 class AgentError(RuntimeError):
@@ -152,6 +154,89 @@ def normalize_dns_servers(value: Any) -> list[str]:
     return result
 
 
+def normalize_web_allow(value: Any) -> str:
+    try:
+        network = ipaddress.ip_network(str(value).strip(), strict=False)
+    except ValueError as exc:
+        raise AgentError("控制台允许来源必须是 IPv4 CIDR，例如 203.0.113.0/24") from exc
+    if network.version != 4:
+        raise AgentError("控制台允许来源必须是 IPv4 CIDR")
+    return network.with_prefixlen
+
+
+def normalize_push_routes(value: Any, vpn_subnet: Any) -> list[str]:
+    if value is None:
+        values: list[Any] = []
+    elif isinstance(value, str):
+        values = [item for item in re.split(r"[\s,]+", value.strip()) if item]
+    elif isinstance(value, (list, tuple)):
+        values = list(value)
+    else:
+        raise AgentError("自定义推送路由必须是 CIDR 列表或每行一个 CIDR")
+
+    try:
+        vpn_network = ipaddress.ip_network(str(vpn_subnet).strip(), strict=False)
+    except ValueError as exc:
+        raise AgentError("VPN 子网无效，无法校验推送路由") from exc
+
+    result: list[str] = []
+    networks: list[ipaddress.IPv4Network] = []
+    for item in values:
+        text = str(item).strip()
+        if not text:
+            continue
+        try:
+            network = ipaddress.ip_network(text, strict=False)
+        except ValueError as exc:
+            raise AgentError(f"自定义推送路由无效：{text}") from exc
+        if network.version != 4 or network.prefixlen < 8 or network.prefixlen > 32:
+            raise AgentError(f"自定义推送路由必须是 /8 到 /32 的 IPv4 私有网段：{text}")
+        if not any(network.subnet_of(private) for private in PRIVATE_V4_NETWORKS):
+            raise AgentError(f"自定义推送路由必须使用 RFC1918 私有地址：{text}")
+        if network.overlaps(vpn_network):
+            raise AgentError(f"自定义推送路由不能与 VPN 子网 {vpn_network.with_prefixlen} 重叠：{text}")
+        if any(network.overlaps(existing) for existing in networks):
+            raise AgentError(f"自定义推送路由之间不能重叠：{text}")
+        networks.append(network)
+        result.append(network.with_prefixlen)
+    return result
+
+
+def normalize_positive_int(value: Any, label: str, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AgentError(f"{label}必须是整数") from exc
+    if number < minimum or number > maximum:
+        raise AgentError(f"{label}必须在 {minimum} 到 {maximum} 之间")
+    return number
+
+
+def ordered_data_ciphers(preferred: str) -> str:
+    return ":".join([preferred, *[item for item in SUPPORTED_DATA_CIPHERS if item != preferred]])
+
+
+def profile_route_lines(
+    config: dict[str, Any],
+    client_name: str,
+    client_networks: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """Return routes that this client should enter manually only when push is unavailable."""
+    settings = normalize_server_settings(config, {})
+    routes = list(settings["push_routes"])
+    for owner, item in (client_networks or {}).items():
+        if owner == client_name or not item.get("share_lan") or not item.get("lan_subnet"):
+            continue
+        network = validate_private_network(item["lan_subnet"], f"客户端 {owner} 的下级内网")
+        if network.with_prefixlen not in routes:
+            routes.append(network.with_prefixlen)
+    return routes
+
+
+def format_cidr_routes(routes: list[str]) -> str:
+    return "\n".join(routes)
+
+
 def normalize_server_settings(current: dict[str, Any], requested: dict[str, Any]) -> dict[str, Any]:
     endpoint = validate_endpoint(requested.get("endpoint", current.get("endpoint", "")))
     vpn_port = validate_port(requested.get("vpn_port", current.get("vpn_port", 1194)), "VPN 端口")
@@ -167,12 +252,53 @@ def normalize_server_settings(current: dict[str, Any], requested: dict[str, Any]
     redirect_gateway = requested.get("redirect_gateway", current.get("redirect_gateway", True))
     if not isinstance(redirect_gateway, bool):
         raise AgentError("全局流量转发选项必须是布尔值")
-    try:
-        max_clients = int(requested.get("max_clients", current.get("max_clients", 100)))
-    except (TypeError, ValueError) as exc:
-        raise AgentError("最大客户端数必须是整数") from exc
-    if max_clients < 1 or max_clients > 1000:
-        raise AgentError("最大客户端数必须在 1 到 1000 之间")
+    max_clients = normalize_positive_int(
+        requested.get("max_clients", current.get("max_clients", 100)),
+        "最大客户端数",
+        1,
+        1000,
+    )
+    web_allow = normalize_web_allow(requested.get("web_allow", current.get("web_allow", "0.0.0.0/0")))
+    tun_mtu = normalize_positive_int(
+        requested.get("tun_mtu", current.get("tun_mtu", 1500)),
+        "TUN MTU",
+        576,
+        65535,
+    )
+    raw_mssfix = requested.get("mssfix", current.get("mssfix", 1450))
+    if raw_mssfix in (None, ""):
+        raw_mssfix = 0
+    mssfix = normalize_positive_int(raw_mssfix, "MSS Fix", 0, 65535)
+    keepalive_ping = normalize_positive_int(
+        requested.get("keepalive_ping", current.get("keepalive_ping", 10)),
+        "Keepalive 检测间隔",
+        1,
+        3600,
+    )
+    keepalive_timeout = normalize_positive_int(
+        requested.get("keepalive_timeout", current.get("keepalive_timeout", 120)),
+        "Keepalive 超时",
+        2,
+        86400,
+    )
+    if keepalive_timeout <= keepalive_ping:
+        raise AgentError("Keepalive 超时必须大于检测间隔")
+    data_cipher = str(requested.get("data_cipher", current.get("data_cipher", "AES-256-GCM"))).strip().upper()
+    if data_cipher not in SUPPORTED_DATA_CIPHERS:
+        raise AgentError("首选数据加密只能选择 AES-256-GCM、AES-128-GCM 或 CHACHA20-POLY1305")
+    auth_digest = str(requested.get("auth_digest", current.get("auth_digest", "SHA256"))).strip().upper()
+    if auth_digest not in SUPPORTED_AUTH_DIGESTS:
+        raise AgentError("HMAC 摘要只能选择 SHA256、SHA384 或 SHA512")
+    log_verb = normalize_positive_int(
+        requested.get("log_verb", current.get("log_verb", 3)),
+        "日志等级",
+        0,
+        11,
+    )
+    push_routes = normalize_push_routes(
+        requested.get("push_routes", current.get("push_routes", [])),
+        vpn_network,
+    )
     if vpn_port == int(current.get("web_port", 8443)):
         raise AgentError("VPN 端口不能与管理控制台端口相同")
 
@@ -185,6 +311,15 @@ def normalize_server_settings(current: dict[str, Any], requested: dict[str, Any]
         dns_servers=dns_servers,
         redirect_gateway=redirect_gateway,
         max_clients=max_clients,
+        web_allow=web_allow,
+        tun_mtu=tun_mtu,
+        mssfix=mssfix,
+        keepalive_ping=keepalive_ping,
+        keepalive_timeout=keepalive_timeout,
+        data_cipher=data_cipher,
+        auth_digest=auth_digest,
+        log_verb=log_verb,
+        push_routes=push_routes,
     )
     return result
 
@@ -368,6 +503,7 @@ def render_server_config(config: dict[str, Any], client_networks: dict[str, dict
     management_socket = str(settings.get("management_socket", "/run/openvpn-manager/openvpn.sock"))
     ipp_path = str(settings.get("ipp_path", "/var/lib/openvpn/server/ipp.txt"))
 
+    data_ciphers = ordered_data_ciphers(settings["data_cipher"])
     lines = [
         f"port {settings['vpn_port']}",
         f"proto {server_protocol}",
@@ -386,15 +522,19 @@ def render_server_config(config: dict[str, Any], client_networks: dict[str, dict
         "remote-cert-tls client",
         "tls-version-min 1.2",
         "",
-        "data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305",
-        "data-ciphers-fallback AES-256-GCM",
-        "auth SHA256",
+        f"tun-mtu {settings['tun_mtu']}",
+        f"data-ciphers {data_ciphers}",
+        f"data-ciphers-fallback {settings['data_cipher']}",
+        f"auth {settings['auth_digest']}",
         "",
     ]
     if settings["redirect_gateway"]:
         lines.append('push "redirect-gateway def1 bypass-dhcp"')
     for dns_server in settings["dns_servers"]:
         lines.append(f'push "dhcp-option DNS {dns_server}"')
+    for route in settings["push_routes"]:
+        network = ipaddress.ip_network(route)
+        lines.append(f'push "route {network.network_address} {network.netmask}"')
 
     routes: list[tuple[str, ipaddress.IPv4Network, bool]] = []
     for client_name, item in client_networks.items():
@@ -415,7 +555,12 @@ def render_server_config(config: dict[str, Any], client_networks: dict[str, dict
     lines.extend(
         [
             "",
-            "keepalive 10 120",
+            f"keepalive {settings['keepalive_ping']} {settings['keepalive_timeout']}",
+            *(
+                [f"mssfix {settings['mssfix']}"]
+                if settings["mssfix"] and protocol == "udp"
+                else []
+            ),
             "persist-key",
             "persist-tun",
             "user nobody",
@@ -432,7 +577,7 @@ def render_server_config(config: dict[str, Any], client_networks: dict[str, dict
             f"management {management_socket} unix",
             "management-client-user root",
             "management-client-group root",
-            "verb 3",
+            f"verb {settings['log_verb']}",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -479,32 +624,44 @@ def render_profile(config: dict[str, Any], client_name: str) -> str:
     protocol = str(config.get("vpn_protocol", "udp")).lower()
     client_protocol = "udp" if protocol == "udp" else "tcp-client"
     server_name = config.get("server_name", "server")
-    return f"""client
-dev tun
-proto {client_protocol}
-remote {endpoint} {port}
-resolv-retry infinite
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-verify-x509-name {server_name} name
-auth SHA256
-auth-nocache
-cipher AES-256-GCM
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-setenv opt block-outside-dns
-verb 3
-
-<ca>
-{ca}</ca>
-<cert>
-{cert}</cert>
-<key>
-{key}</key>
-<tls-crypt>
-{tls_crypt}</tls-crypt>
-"""
+    settings = normalize_server_settings(config, {})
+    data_ciphers = ordered_data_ciphers(settings["data_cipher"])
+    lines = [
+        "client",
+        "dev tun",
+        f"proto {client_protocol}",
+        f"remote {endpoint} {port}",
+        f"tun-mtu {settings['tun_mtu']}",
+    ]
+    if settings["mssfix"] and protocol == "udp":
+        lines.append(f"mssfix {settings['mssfix']}")
+    lines.extend(
+        [
+            "resolv-retry infinite",
+            "nobind",
+            "persist-key",
+            "persist-tun",
+            "remote-cert-tls server",
+            f"verify-x509-name {server_name} name",
+            f"auth {settings['auth_digest']}",
+            "auth-nocache",
+            f"data-ciphers {data_ciphers}",
+            f"data-ciphers-fallback {settings['data_cipher']}",
+            "setenv opt block-outside-dns",
+            "mute-replay-warnings",
+            f"verb {settings['log_verb']}",
+            "",
+            "<ca>",
+            ca.rstrip("\n") + "</ca>",
+            "<cert>",
+            cert.rstrip("\n") + "</cert>",
+            "<key>",
+            key.rstrip("\n") + "</key>",
+            "<tls-crypt>",
+            tls_crypt.rstrip("\n") + "</tls-crypt>",
+        ]
+    )
+    return "\n".join(lines) + "\n"
 
 
 class OpenVPNController:
@@ -670,6 +827,14 @@ class OpenVPNController:
             "max_clients": int(self.config.get("max_clients", 100)),
             "web_port": int(self.config["web_port"]),
             "web_allow": self.config.get("web_allow", "0.0.0.0/0"),
+            "tun_mtu": int(self.config.get("tun_mtu", 1500)),
+            "mssfix": int(self.config.get("mssfix", 1450)),
+            "keepalive_ping": int(self.config.get("keepalive_ping", 10)),
+            "keepalive_timeout": int(self.config.get("keepalive_timeout", 120)),
+            "data_cipher": self.config.get("data_cipher", "AES-256-GCM"),
+            "auth_digest": self.config.get("auth_digest", "SHA256"),
+            "log_verb": int(self.config.get("log_verb", 3)),
+            "push_routes": list(self.config.get("push_routes", [])),
         }
 
     def list_clients(self) -> list[dict[str, Any]]:
@@ -711,6 +876,15 @@ class OpenVPNController:
             "dns_servers": list(self.config.get("dns_servers", [])),
             "redirect_gateway": bool(self.config.get("redirect_gateway", True)),
             "max_clients": int(self.config.get("max_clients", 100)),
+            "web_allow": self.config.get("web_allow", "0.0.0.0/0"),
+            "tun_mtu": int(self.config.get("tun_mtu", 1500)),
+            "mssfix": int(self.config.get("mssfix", 1450)),
+            "keepalive_ping": int(self.config.get("keepalive_ping", 10)),
+            "keepalive_timeout": int(self.config.get("keepalive_timeout", 120)),
+            "data_cipher": self.config.get("data_cipher", "AES-256-GCM"),
+            "auth_digest": self.config.get("auth_digest", "SHA256"),
+            "log_verb": int(self.config.get("log_verb", 3)),
+            "push_routes": list(self.config.get("push_routes", [])),
             "manager_version": self._manager_version(),
             "version": version_line,
             "checked_at": utc_now(),
@@ -944,6 +1118,8 @@ class OpenVPNController:
             raise AgentError(f"客户端配置不可用：{exc}") from exc
         if len(content) > 128_000:
             raise AgentError("客户端配置超过安全大小限制")
+        networks = self._read_client_networks()
+        manual_routes = profile_route_lines(self.config, name, networks)
         return {
             "name": name,
             "filename": f"{name}.ovpn",
@@ -953,6 +1129,28 @@ class OpenVPNController:
                 "server": self.config["endpoint"],
                 "port": int(self.config["vpn_port"]),
                 "protocol": str(self.config.get("vpn_protocol", "udp")).upper(),
+                "line": "自动",
+                "tunnel_type": "TUN",
+                "cipher": self.config.get("data_cipher", "AES-256-GCM"),
+                "compression": "关闭",
+                "mtu": int(self.config.get("tun_mtu", 1500)),
+                "additional_config": "\n".join(
+                    [
+                        f"tun-mtu {self.config.get('tun_mtu', 1500)}",
+                        *(
+                            [f"mssfix {self.config['mssfix']}"]
+                            if self.config.get("mssfix") and str(self.config.get("vpn_protocol", "udp")).lower() == "udp"
+                            else []
+                        ),
+                        "auth-nocache",
+                        "mute-replay-warnings",
+                        "nobind",
+                    ]
+                ),
+                "server_route_push": True,
+                "routes": format_cidr_routes(manual_routes),
+                "redial": False,
+                "line_check": "使用爱快默认值",
                 "authentication": "静态密钥（tls-crypt）",
                 "ca_certificate": extract_pem(self.easy_rsa_dir / "pki" / "ca.crt", "CERTIFICATE"),
                 "client_certificate": extract_pem(
