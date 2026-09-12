@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.2"
+VERSION="1.2.3"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -689,10 +689,12 @@ install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-firewall.service" /etc/syste
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-agent.service" /etc/systemd/system/openvpn-manager-agent.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-update.service" /etc/systemd/system/openvpn-manager-update.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-web-manager.service" /etc/systemd/system/openvpn-web-manager.service
+install -m 0644 "$SCRIPT_DIR/config/openvpn-manager.tmpfiles" /etc/tmpfiles.d/openvpn-manager.conf
 install -d -m 0755 /etc/systemd/system/openvpn-server@server.service.d
 install -m 0644 "$SCRIPT_DIR/config/openvpn-service-override.conf" \
   /etc/systemd/system/openvpn-server@server.service.d/openvpn-manager.conf
 
+systemd-tmpfiles --create /etc/tmpfiles.d/openvpn-manager.conf
 systemctl daemon-reload
 systemctl enable openvpn-manager-firewall.service
 systemctl restart openvpn-manager-firewall.service

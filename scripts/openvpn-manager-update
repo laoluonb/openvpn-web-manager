@@ -60,7 +60,8 @@ on_error() {
 trap cleanup EXIT
 trap 'on_error "$?" "$LINENO"' ERR
 
-install -d -m 0750 /run/openvpn-manager /var/lib/openvpn-manager
+install -d -m 0750 -o root -g openvpn-web /run/openvpn-manager /var/lib/openvpn-manager
+systemd-tmpfiles --create /etc/tmpfiles.d/openvpn-manager.conf 2>/dev/null || true
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   write_status "failed" "已有更新任务正在运行。"

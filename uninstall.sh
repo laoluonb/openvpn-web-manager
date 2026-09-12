@@ -67,7 +67,9 @@ rm -f \
   /usr/local/sbin/openvpn-manager-firewall \
   /usr/local/sbin/openvpn-manager-update \
   /usr/local/bin/openvpn-managerctl \
-  /etc/sysctl.d/99-openvpn-manager.conf
+  /etc/sysctl.d/99-openvpn-manager.conf \
+  /etc/tmpfiles.d/openvpn-manager.conf
+rm -rf /run/openvpn-manager
 rm -rf /opt/openvpn-web-manager
 systemctl daemon-reload
 

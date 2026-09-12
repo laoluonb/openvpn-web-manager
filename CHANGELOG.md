@@ -1,5 +1,11 @@
 # 更新日志
 
+## 1.2.3 - 2026-09-12
+
+- 修复 OpenVPN 重启后 `/run/openvpn-manager` 被 systemd 重新创建为错误属主，导致 Web 页面无法连接
+  `agent.sock`、日志和更新状态显示“控制代理当前不可用”的问题。现在由 `tmpfiles.d` 统一管理运行目录，
+  OpenVPN 和管理代理不再各自声明 `RuntimeDirectory`。
+
 ## 1.2.2 - 2026-09-12
 
 - 修复系统页面加载日志时出现 `控制代理当前不可用：[Errno 13] Permission denied`：代理启动时会

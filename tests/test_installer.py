@@ -99,12 +99,18 @@ class InstallerRegressionTests(unittest.TestCase):
     def test_runtime_sync_management_socket_and_online_updater_are_installed(self) -> None:
         installer = (ROOT / "install.sh").read_text(encoding="utf-8")
         override = (ROOT / "config/openvpn-service-override.conf").read_text(encoding="utf-8")
+        agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
+        tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.2"', installer)
+        self.assertIn('VERSION="1.2.3"', installer)
         self.assertIn('agent.py" --direct sync_runtime', installer)
         self.assertIn("openvpn-manager-update.service", installer)
-        self.assertIn("RuntimeDirectory=openvpn-manager", override)
-        self.assertIn("RuntimeDirectoryPreserve=yes", override)
+        self.assertIn('config/openvpn-manager.tmpfiles" /etc/tmpfiles.d/openvpn-manager.conf', installer)
+        self.assertIn("systemd-tmpfiles --create /etc/tmpfiles.d/openvpn-manager.conf", installer)
+        self.assertIn("RuntimeDirectory=", override)
+        self.assertNotIn("RuntimeDirectory=openvpn-manager", override)
+        self.assertNotIn("RuntimeDirectory=openvpn-manager", agent_service)
+        self.assertIn("d /run/openvpn-manager 0750 root openvpn-web -", tmpfiles)
         self.assertIn("api.github.com/repos/$REPOSITORY/releases/latest", updater)
         self.assertIn("--existing-action preserve", updater)
         self.assertIn('data.get("vpn_port", 1194)', updater)
@@ -173,6 +179,11 @@ class InstallerRegressionTests(unittest.TestCase):
         agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
         self.assertIn("os.chown(socket_file.parent, 0, group_id)", agent)
         self.assertIn("os.chmod(socket_file.parent, 0o750)", agent)
+
+    def test_uninstaller_removes_shared_runtime_directory_definition(self) -> None:
+        uninstaller = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
+        self.assertIn("/etc/tmpfiles.d/openvpn-manager.conf", uninstaller)
+        self.assertIn("rm -rf /run/openvpn-manager", uninstaller)
 
 
 if __name__ == "__main__":

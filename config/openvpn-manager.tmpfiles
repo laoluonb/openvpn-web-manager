@@ -1,0 +1,4 @@
+# Keep the shared runtime directory owned by the web group.  It contains both
+# the privileged agent socket and the OpenVPN management socket; OpenVPN must
+# not recreate it as root:root (or nobody:nogroup) when its unit restarts.
+d /run/openvpn-manager 0750 root openvpn-web -

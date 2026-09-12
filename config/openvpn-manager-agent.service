@@ -14,9 +14,6 @@ Environment=OPENVPN_MANAGER_SOCKET=/run/openvpn-manager/agent.sock
 ExecStart=/usr/bin/python3 /opt/openvpn-web-manager/backend/agent.py
 Restart=on-failure
 RestartSec=3
-RuntimeDirectory=openvpn-manager
-RuntimeDirectoryMode=0750
-RuntimeDirectoryPreserve=yes
 UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true
