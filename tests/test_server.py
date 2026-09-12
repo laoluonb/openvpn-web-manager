@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import unittest
 
-from backend.server import LoginLimiter, SessionManager, hash_password, verify_password
+from backend.server import DemoAgent, LoginLimiter, SessionManager, hash_password, verify_password
 
 
 class PasswordTests(unittest.TestCase):
@@ -44,6 +44,21 @@ class LoginLimiterTests(unittest.TestCase):
         self.assertTrue(limiter.limited("127.0.0.1"))
         limiter.success("127.0.0.1")
         self.assertFalse(limiter.limited("127.0.0.1"))
+
+
+class DemoClientLifecycleTests(unittest.TestCase):
+    def test_revoked_client_is_removed_from_demo_management_views(self) -> None:
+        agent = DemoAgent()
+        self.assertEqual(
+            [item["name"] for item in agent.request({"action": "list_clients"})],
+            ["ethan-laptop", "phone"],
+        )
+        result = agent.request({"action": "revoke_client", "name": "phone"})
+        self.assertTrue(result["deleted"])
+        self.assertEqual(
+            [item["name"] for item in agent.request({"action": "list_clients"})],
+            ["ethan-laptop"],
+        )
 
 
 if __name__ == "__main__":

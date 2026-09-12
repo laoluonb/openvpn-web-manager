@@ -24,6 +24,11 @@ import time
 import urllib.parse
 from typing import Any
 
+try:
+    from .agent import filter_active_clients
+except ImportError:  # Allow `python3 backend/server.py --demo` from the project root.
+    from agent import filter_active_clients
+
 
 CONFIG_PATH = os.environ.get("OPENVPN_MANAGER_CONFIG", "/etc/openvpn-manager/server.json")
 WEB_CONFIG_PATH = os.environ.get("OPENVPN_MANAGER_WEB_CONFIG", "/etc/openvpn-manager/web.json")
@@ -199,7 +204,7 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.5-demo",
+            "manager_version": "1.2.6-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.clients = [
@@ -259,7 +264,7 @@ class DemoAgent:
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
             **self.settings,
-            "manager_version": "1.2.5-demo",
+            "manager_version": "1.2.6-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -268,11 +273,11 @@ class DemoAgent:
         action = payload.get("action")
         with self.lock:
             if action == "overview":
-                return {"status": self._status(), "clients": list(self.clients)}
+                return {"status": self._status(), "clients": filter_active_clients(self.clients)}
             if action == "status":
                 return self._status()
             if action == "list_clients":
-                return list(self.clients)
+                return filter_active_clients(self.clients)
             if action == "create_client":
                 name = payload.get("name", "")
                 if not CLIENT_NAME_RE.fullmatch(name) or name.lower() in {"server", "ca", "root"}:
@@ -314,7 +319,7 @@ class DemoAgent:
                 for item in self.clients:
                     if item["name"] == name and item["status"] == "active":
                         item.update(status="revoked", revoked_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"), has_profile=False, online=False, lan_subnet=None, share_lan=False, connection=None)
-                        return {"name": name, "status": "revoked"}
+                        return {"name": name, "status": "revoked", "deleted": True, "deleted_artifacts": ["演示客户端文件"]}
                 raise APIError("未找到有效客户端", 404)
             if action == "get_profile":
                 name = payload.get("name", "client")
@@ -401,6 +406,28 @@ DEMO-TLS-CRYPT
                         "openvpn-server@server: ethan-laptop/203.0.113.42:52881 PUSH: Received control message",
                     ],
                 }
+            if action == "client_logs":
+                name = str(payload.get("name", "")).strip()
+                if not any(item["name"] == name and item["status"] == "active" for item in self.clients):
+                    raise APIError("只能查看有效客户端的日志", 404)
+                service_lines = [
+                    "openvpn-server@server: Initialization Sequence Completed",
+                    "openvpn-server@server: MULTI: multi_create_instance called",
+                    "openvpn-server@server: peer info: IV_VER=3.git::58b92569",
+                    "openvpn-server@server: Data Channel: cipher 'AES-256-GCM'",
+                    "openvpn-server@server: ethan-laptop/203.0.113.42:52881 MULTI_sva: pool returned IPv4=10.8.0.2",
+                    "openvpn-server@server: ethan-laptop/203.0.113.42:52881 PUSH: Received control message",
+                ]
+                lines = [
+                    line for line in service_lines if name in line
+                ]
+                return {
+                    "name": name,
+                    "lines": lines,
+                    "count": payload.get("lines", 120),
+                    "matched_count": len(lines),
+                    "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
             if action == "set_web_password":
                 return {"changed": True}
             if action == "update_status":
@@ -409,9 +436,9 @@ DEMO-TLS-CRYPT
                 self.update_state = {
                     "state": "completed",
                     "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
-                    "manager_version": "1.2.5-demo",
+                    "manager_version": "1.2.6-demo",
                     "openvpn_version": "OpenVPN 2.6 demo",
-                    "target_version": "v1.2.5-demo",
+                    "target_version": "v1.2.6-demo",
                 }
                 return dict(self.update_state)
             raise APIError("不支持此演示操作")
@@ -592,6 +619,19 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 lines = 120
             self._send_json(200, self.context.agent.request({"action": "logs", "lines": lines}))
+            return
+        client_logs_match = re.fullmatch(r"/api/clients/([^/]+)/logs", path)
+        if client_logs_match:
+            self._require_session()
+            name = self._route_name(client_logs_match.group(1))
+            try:
+                lines = int(query.get("lines", ["120"])[0])
+            except ValueError:
+                lines = 120
+            self._send_json(
+                200,
+                self.context.agent.request({"action": "client_logs", "name": name, "lines": lines}),
+            )
             return
         if path == "/api/server/settings":
             self._require_session()

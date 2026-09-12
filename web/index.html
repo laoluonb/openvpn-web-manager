@@ -130,7 +130,7 @@
         <div class="metric-grid">
           <article class="metric-card"><div class="metric-icon metric-green"><svg><use href="#i-activity"></use></svg></div><div><span>当前在线</span><strong id="onlineCount">—</strong><small id="onlineHint">实时 VPN 会话</small></div></article>
           <article class="metric-card"><div class="metric-icon metric-indigo"><svg><use href="#i-key"></use></svg></div><div><span>有效配置</span><strong id="activeCount">—</strong><small id="activeHint">已签发凭据</small></div></article>
-          <article class="metric-card"><div class="metric-icon metric-cyan"><svg><use href="#i-users"></use></svg></div><div><span>全部记录</span><strong id="totalCount">—</strong><small>包含已吊销客户端</small></div></article>
+          <article class="metric-card"><div class="metric-icon metric-cyan"><svg><use href="#i-users"></use></svg></div><div><span>客户端数量</span><strong id="totalCount">—</strong><small>当前可用配置</small></div></article>
           <article class="metric-card"><div class="metric-icon metric-amber"><svg><use href="#i-server"></use></svg></div><div><span>传输协议</span><strong id="transportValue">—</strong><small id="subnetValue">VPN 子网</small></div></article>
         </div>
 
@@ -160,7 +160,7 @@
           </div>
           <div class="table-tools">
             <label class="search-box"><svg><use href="#i-search"></use></svg><input id="clientSearch" placeholder="搜索客户端" aria-label="搜索客户端"></label>
-            <div class="legend"><span><i class="legend-dot online"></i>在线</span><span><i class="legend-dot offline"></i>离线</span><span><i class="legend-dot revoked"></i>已吊销</span></div>
+            <div class="legend"><span><i class="legend-dot online"></i>在线</span><span><i class="legend-dot offline"></i>离线</span><span class="client-log-hint">仅显示有效证书</span></div>
           </div>
           <div class="table-wrap">
             <table>
@@ -323,6 +323,15 @@
       </section>
       <div class="profile-toolbar"><div><strong>完整 .ovpn 配置</strong><span id="profileFilename">client.ovpn</span></div><div><button id="copyProfileButton" class="button button-secondary" type="button"><svg><use href="#i-copy"></use></svg><span>复制全文</span></button><button id="downloadProfileButton" class="button button-primary" type="button"><svg><use href="#i-download"></use></svg><span>下载</span></button></div></div>
       <pre id="profileContent" class="profile-code" tabindex="0">正在读取配置…</pre>
+    </div>
+  </dialog>
+
+  <dialog id="clientLogsDialog" class="modal modal-wide">
+    <div class="profile-dialog-content client-logs-content">
+      <button class="modal-close" data-close-dialog="clientLogsDialog" type="button" aria-label="关闭"><svg><use href="#i-x"></use></svg></button>
+      <div class="profile-heading"><div class="modal-icon"><svg><use href="#i-terminal"></use></svg></div><div><p class="eyebrow">客户端日志</p><h2 id="clientLogsTitle">客户端日志</h2><p id="clientLogsMeta">仅显示 OpenVPN 服务日志中匹配该客户端名称的记录。</p></div></div>
+      <div class="client-logs-toolbar"><span id="clientLogsSummary">正在读取日志…</span><button id="refreshClientLogsButton" class="button button-secondary" type="button"><svg><use href="#i-refresh"></use></svg><span>刷新日志</span></button></div>
+      <pre id="clientLogsOutput" class="profile-code client-logs-output" tabindex="0">正在读取日志…</pre>
     </div>
   </dialog>
 

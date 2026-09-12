@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.5"
+VERSION="1.2.6"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"

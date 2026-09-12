@@ -54,6 +54,9 @@ def main() -> int:
     revoke.add_argument("name")
     logs = sub.add_parser("logs")
     logs.add_argument("lines", nargs="?", type=int, default=100)
+    client_logs = sub.add_parser("client-logs")
+    client_logs.add_argument("name")
+    client_logs.add_argument("lines", nargs="?", type=int, default=120)
     sub.add_parser("restart")
     sub.add_parser("update")
     sub.add_parser("update-status")
@@ -78,6 +81,7 @@ def main() -> int:
         "profile": {"action": "get_profile", "name": getattr(args, "name", "")},
         "revoke": {"action": "revoke_client", "name": getattr(args, "name", "")},
         "logs": {"action": "logs", "lines": getattr(args, "lines", 100)},
+        "client-logs": {"action": "client_logs", "name": getattr(args, "name", ""), "lines": getattr(args, "lines", 120)},
         "restart": {"action": "restart"},
         "update": {"action": "start_update"},
         "update-status": {"action": "update_status"},

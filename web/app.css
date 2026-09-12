@@ -261,6 +261,7 @@ td { height: 67px; padding: 8px 15px; border-top: 1px solid var(--line); font-si
 .row-button.warning:hover { color: var(--warning); background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 30%, var(--line)); }
 .row-button:disabled { opacity: .35; cursor: not-allowed; }
 .row-button svg { width: 15px; height: 15px; }
+.client-log-hint { color: var(--muted-2); font-size: 9px; }
 .empty-state { padding: 46px 20px; color: var(--muted-2); font-size: 11px; text-align: center; }
 .empty-state.compact { padding: 30px 10px; }
 
@@ -412,6 +413,9 @@ td { height: 67px; padding: 8px 15px; border-top: 1px solid var(--line); font-si
 .profile-toolbar span { color: var(--muted-2); font-size: 9px; }
 .profile-toolbar > div:last-child { display: flex; gap: 8px; }
 .profile-code { min-height: 330px; max-height: 48vh; margin: 12px 0 0; padding: 18px; overflow: auto; color: #c8efd9; background: #0c1220; border: 1px solid #252e43; border-radius: 14px; font: 10px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre; tab-size: 2; }
+.client-logs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 21px; }
+.client-logs-toolbar > span { color: var(--muted-2); font-size: 9px; }
+.client-logs-output { min-height: 360px; max-height: 58vh; margin-top: 12px; }
 
 .toast-region { position: fixed; z-index: 100; right: 22px; bottom: 22px; display: grid; gap: 9px; width: min(360px, calc(100% - 44px)); }
 .toast { display: flex; align-items: flex-start; gap: 11px; padding: 14px 16px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--success); border-radius: 12px; box-shadow: var(--shadow-lg); animation: toast-in .25s ease; }
@@ -483,6 +487,7 @@ td { height: 67px; padding: 8px 15px; border-top: 1px solid var(--line); font-si
   .advanced-grid .span-two { grid-column: auto; }
   .copy-value.span-two { grid-column: auto; }
   .profile-toolbar { align-items: stretch; flex-direction: column; }
+  .client-logs-toolbar { align-items: stretch; flex-direction: column; }
   .profile-toolbar > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
   .modal > form, .confirm-content, .profile-dialog-content { padding: 25px 21px; }
 }

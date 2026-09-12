@@ -6,6 +6,9 @@ import unittest
 
 from backend.agent import (
     AgentError,
+    client_artifact_entries,
+    filter_active_clients,
+    filter_client_log_lines,
     normalize_client_network,
     normalize_server_settings,
     parse_index,
@@ -69,6 +72,70 @@ class AgentParsingTests(unittest.TestCase):
             self.assertTrue(parsed[0]["online"])
             self.assertTrue(parsed[0]["has_profile"])
             self.assertEqual(parsed[1]["status"], "revoked")
+
+    def test_management_views_hide_revoked_and_expired_clients(self) -> None:
+        clients = [
+            {"name": "active", "status": "active"},
+            {"name": "revoked", "status": "revoked"},
+            {"name": "expired", "status": "expired"},
+        ]
+        self.assertEqual([item["name"] for item in filter_active_clients(clients)], ["active"])
+
+    def test_client_log_filter_matches_exact_common_name(self) -> None:
+        lines = [
+            "client-a/203.0.113.1:1000 Peer Connection Initiated",
+            "client-ab/203.0.113.2:1001 Peer Connection Initiated",
+            "CN=client-a authentication succeeded",
+        ]
+        self.assertEqual(filter_client_log_lines(lines, "client-a"), [lines[0], lines[2]])
+
+    def test_revoked_artifacts_do_not_include_pki_index_or_crl(self) -> None:
+        entries = client_artifact_entries(
+            pathlib.Path("/etc/openvpn/server/easy-rsa"),
+            pathlib.Path("/var/lib/openvpn-manager/clients"),
+            "alice",
+            "0A",
+        )
+        paths = {path.as_posix() for _label, path in entries}
+        self.assertIn("/var/lib/openvpn-manager/clients/alice.ovpn", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/issued/alice.crt", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/private/alice.key", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/certs_by_serial/0A.pem", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/revoked/certs_by_serial/0A.crt", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/revoked/private_by_serial/0A.key", paths)
+        self.assertIn("/etc/openvpn/server/easy-rsa/pki/revoked/reqs_by_serial/0A.req", paths)
+        self.assertNotIn("/etc/openvpn/server/easy-rsa/pki/index.txt", paths)
+        self.assertNotIn("/etc/openvpn/server/easy-rsa/pki/crl.pem", paths)
+
+    def test_remove_client_artifacts_deletes_exact_files(self) -> None:
+        from backend.agent import remove_client_artifacts
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            easy = root / "easy-rsa"
+            pki = easy / "pki"
+            profiles = root / "clients"
+            for path in (
+                profiles / "alice.ovpn",
+                pki / "issued" / "alice.crt",
+                pki / "private" / "alice.key",
+                pki / "reqs" / "alice.req",
+                pki / "certs_by_serial" / "0A.pem",
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("secret", encoding="utf-8")
+            # Similar names must survive an exact-name cleanup.
+            (profiles / "alice-old.ovpn").write_text("keep", encoding="utf-8")
+            (pki / "issued" / "alice-old.crt").write_text("keep", encoding="utf-8")
+            removed = remove_client_artifacts(easy, profiles, "alice", "0A")
+            self.assertGreaterEqual(len(removed), 5)
+            self.assertFalse((profiles / "alice.ovpn").exists())
+            self.assertFalse((pki / "issued" / "alice.crt").exists())
+            self.assertFalse((pki / "private" / "alice.key").exists())
+            self.assertFalse((pki / "reqs" / "alice.req").exists())
+            self.assertFalse((pki / "certs_by_serial" / "0A.pem").exists())
+            self.assertTrue((profiles / "alice-old.ovpn").exists())
+            self.assertTrue((pki / "issued" / "alice-old.crt").exists())
 
 
 class ProfileRenderingTests(unittest.TestCase):

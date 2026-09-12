@@ -35,6 +35,15 @@ class FrontendRegressionTests(unittest.TestCase):
         self.assertIn('r"/api/clients/([^/]+)/disconnect"', server)
         self.assertIn('r"/api/clients/([^/]+)/network"', server)
 
+    def test_revoked_clients_are_deleted_and_hidden(self) -> None:
+        html = (ROOT / "web/index.html").read_text(encoding="utf-8")
+        javascript = (ROOT / "web/app.js").read_text(encoding="utf-8")
+        agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
+        self.assertIn("吊销并删除", javascript)
+        self.assertIn("filter_active_clients", agent)
+        self.assertIn("remove_client_artifacts", agent)
+        self.assertIn("PKI 吊销记录仍会保留", javascript)
+
     def test_online_update_copy_promises_to_preserve_vpn_port(self) -> None:
         html = (ROOT / "web/index.html").read_text(encoding="utf-8")
         javascript = (ROOT / "web/app.js").read_text(encoding="utf-8")

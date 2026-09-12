@@ -172,7 +172,9 @@ LZO 压缩关闭、MTU 使用页面值，认证方式选择 **静态密钥（tls
 ### 踢出与吊销
 
 - **踢出连接**：立即断开该客户端当前在线会话，不删除证书；客户端仍可使用原配置重新连接。
-- **吊销配置**：撤销证书并更新 CRL，原配置将永久失效；同名证书不能直接重新创建。
+- **吊销并删除**：撤销证书、更新 CRL，并删除该客户端的 `.ovpn`、证书、私钥、证书请求及 Easy-RSA 序列号归档文件；原配置将永久失效，同名证书不能直接重新创建。
+- 为保证旧证书不会重新生效，Easy-RSA 的 `pki/index.txt` 吊销记录和 CRL 文件不会删除；它们是吊销校验所必需的审计数据。
+- 客户端列表、概览数量和日志入口只显示有效证书；已吊销或已过期记录不会再显示。
 
 ### 客户端下级内网
 
@@ -236,6 +238,7 @@ sudo openvpn-managerctl network branch-a ""
 sudo openvpn-managerctl disconnect branch-a
 sudo openvpn-managerctl profile branch-a
 sudo openvpn-managerctl revoke branch-a
+# 吊销并删除该客户端的生成文件；PKI 吊销记录仍保留
 sudo openvpn-managerctl logs 100
 sudo openvpn-managerctl restart
 sudo openvpn-managerctl update

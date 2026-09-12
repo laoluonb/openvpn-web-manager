@@ -10,6 +10,7 @@ const state = {
   updateTimer: null,
   confirmAction: null,
   profile: null,
+  clientLogsName: "",
   serverDirty: false,
 };
 
@@ -301,7 +302,7 @@ function renderClientTable(clients) {
       <td><strong class="vpn-address"></strong><div class="cell-subtle real-address"></div></td>
       <td><div class="traffic-cell"><span class="received"></span><span class="sent"></span></div></td>
       <td><strong class="expiry"></strong><div class="cell-subtle serial"></div></td>
-      <td><div class="row-actions"><button class="row-button view" title="查看配置内容" aria-label="查看配置内容">${icon("eye")}</button><button class="row-button network" title="配置下级内网" aria-label="配置下级内网">${icon("route")}</button><button class="row-button warning disconnect" title="踢出当前连接" aria-label="踢出当前连接">${icon("plug")}</button><button class="row-button download" title="下载配置" aria-label="下载配置">${icon("download")}</button><button class="row-button danger revoke" title="吊销配置" aria-label="吊销配置">${icon("trash")}</button></div></td>`;
+      <td><div class="row-actions"><button class="row-button view" title="查看配置内容" aria-label="查看配置内容">${icon("eye")}</button><button class="row-button logs" title="查看客户端日志" aria-label="查看客户端日志">${icon("terminal")}</button><button class="row-button network" title="配置下级内网" aria-label="配置下级内网">${icon("route")}</button><button class="row-button warning disconnect" title="踢出当前连接" aria-label="踢出当前连接">${icon("plug")}</button><button class="row-button download" title="下载配置" aria-label="下载配置">${icon("download")}</button><button class="row-button danger revoke" title="吊销并删除" aria-label="吊销并删除">${icon("trash")}</button></div></td>`;
     const nameButton = row.querySelector(".client-name-button");
     nameButton.textContent = client.name;
     row.querySelector(".client-cell span").textContent = `创建于 ${formatDate(client.created_at)}`;
@@ -332,11 +333,13 @@ function renderClientTable(clients) {
     row.querySelector(".serial").textContent = `序列号 ${client.serial || "—"}`;
     const active = client.status === "active";
     const view = row.querySelector(".view");
+    const logs = row.querySelector(".logs");
     const network = row.querySelector(".network");
     const disconnect = row.querySelector(".disconnect");
     const download = row.querySelector(".download");
     const revoke = row.querySelector(".revoke");
     view.disabled = !active || !client.has_profile;
+    logs.disabled = !active;
     network.disabled = !active;
     disconnect.disabled = !active || !client.online;
     download.disabled = !active || !client.has_profile;
@@ -344,6 +347,7 @@ function renderClientTable(clients) {
     nameButton.disabled = view.disabled;
     nameButton.addEventListener("click", () => viewProfile(client.name));
     view.addEventListener("click", () => viewProfile(client.name));
+    logs.addEventListener("click", () => viewClientLogs(client.name));
     network.addEventListener("click", () => openNetworkDialog(client));
     disconnect.addEventListener("click", () => confirmDisconnect(client.name));
     download.addEventListener("click", () => downloadProfile(client.name));
@@ -426,6 +430,42 @@ async function downloadProfile(name) {
     toast("开始下载", `${name}.ovpn 已安全生成。`);
   } catch (err) {
     toast("下载失败", err.message, "error");
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+async function viewClientLogs(name) {
+  state.clientLogsName = name;
+  byId("clientLogsTitle").textContent = `${name} 的客户端日志`;
+  byId("clientLogsMeta").textContent = "仅显示 OpenVPN 服务日志中匹配该客户端名称的记录。";
+  byId("clientLogsSummary").textContent = "正在读取日志…";
+  byId("clientLogsOutput").textContent = "正在读取日志…";
+  openDialog("clientLogsDialog");
+  await loadClientLogs();
+}
+
+async function loadClientLogs() {
+  const name = state.clientLogsName;
+  if (!name) return;
+  const button = byId("refreshClientLogsButton");
+  setBusy(button, true, "正在加载…");
+  try {
+    const result = await api(`/api/clients/${encodeURIComponent(name)}/logs?lines=200`);
+    const lines = result.lines || [];
+    byId("clientLogsOutput").textContent = lines.join("\n") || "最近日志中没有匹配该客户端名称的记录。";
+    byId("clientLogsSummary").textContent = `匹配 ${result.matched_count || 0} 条 · 检查于 ${formatDateTime(result.checked_at)}`;
+  } catch (err) {
+    byId("clientLogsOutput").textContent = `无法加载客户端日志：${err.message}`;
+    byId("clientLogsSummary").textContent = "读取失败";
+    toast("读取客户端日志失败", err.message, "error");
+  } finally {
+    setBusy(button, false);
   }
 }
 
@@ -608,11 +648,11 @@ function confirmDisconnect(name) {
 function confirmRevoke(name) {
   showConfirm({
     title: `确认吊销 ${name}？`,
-    message: "该配置会立即失效。OpenVPN 将短暂重启，并且此证书名称以后不能再次使用。",
-    label: "吊销配置",
+    message: "该配置会立即失效，并删除 .ovpn、客户端证书、私钥及 Easy-RSA 归档文件。OpenVPN 将短暂重启；PKI 吊销记录仍会保留，确保旧证书无法恢复。",
+    label: "吊销并删除",
     action: async () => {
       await api(`/api/clients/${encodeURIComponent(name)}`, { method: "DELETE" });
-      toast("配置已吊销", `${name} 已无法继续连接。`);
+      toast("已吊销并删除", `${name} 已无法继续连接，相关客户端文件已清理。`);
       await loadOverview(true);
     },
   });
@@ -816,6 +856,7 @@ function bindEvents() {
   byId("passwordForm").addEventListener("submit", changePassword);
   byId("restartButton").addEventListener("click", confirmRestart);
   byId("loadLogsButton").addEventListener("click", loadLogs);
+  byId("refreshClientLogsButton").addEventListener("click", loadClientLogs);
   byId("updateButton").addEventListener("click", confirmUpdate);
   byId("copyEndpoint").addEventListener("click", copyEndpoint);
   byId("copyProfileButton").addEventListener("click", () => {

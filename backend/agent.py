@@ -418,6 +418,93 @@ def parse_status(text: str) -> list[dict[str, Any]]:
     return clients
 
 
+def filter_client_log_lines(lines: list[str], client_name: str) -> list[str]:
+    """Return journal lines for one exact OpenVPN common name."""
+    name = validate_client_name(client_name)
+    pattern = re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(name)}(?![A-Za-z0-9_-])")
+    return [line for line in lines if pattern.search(line)]
+
+
+def filter_active_clients(clients: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hide revoked/expired certificate records from management views."""
+    return [item for item in clients if item.get("status") == "active"]
+
+
+def client_artifact_entries(
+    easy_rsa_dir: pathlib.Path,
+    profiles_dir: pathlib.Path,
+    name: str,
+    serial: Any = "",
+) -> list[tuple[str, pathlib.Path]]:
+    """Return exact generated credential paths belonging to one client.
+
+    Easy-RSA releases use slightly different file extensions and may keep
+    generated material in more than one standard PKI directory.  The PKI
+    database and CRL are intentionally excluded: the revocation record must
+    remain so a previously issued certificate cannot become valid again.
+    """
+    name = validate_client_name(name)
+    pki = easy_rsa_dir / "pki"
+    entries: list[tuple[str, pathlib.Path]] = [
+        ("客户端 .ovpn 配置", profiles_dir / f"{name}.ovpn"),
+        ("客户端证书", pki / "issued" / f"{name}.crt"),
+        ("客户端证书（PEM）", pki / "issued" / f"{name}.pem"),
+        ("客户端私钥", pki / "private" / f"{name}.key"),
+        ("客户端私钥（PEM）", pki / "private" / f"{name}.pem"),
+        ("证书请求", pki / "reqs" / f"{name}.req"),
+        ("证书请求（PEM）", pki / "reqs" / f"{name}.pem"),
+    ]
+
+    serial_text = str(serial or "").strip()
+    if re.fullmatch(r"[0-9A-Fa-f]+", serial_text):
+        serial_variants = dict.fromkeys((serial_text, serial_text.upper(), serial_text.lower()))
+        serial_locations = (
+            ("按序列号保存的证书", pki / "certs_by_serial", ("pem", "crt")),
+            ("吊销归档证书", pki / "revoked" / "certs_by_serial", ("pem", "crt")),
+            ("吊销归档私钥", pki / "revoked" / "private_by_serial", ("key", "pem")),
+            ("吊销归档请求", pki / "revoked" / "reqs_by_serial", ("req", "pem")),
+            ("续期归档证书", pki / "renewed" / "certs_by_serial", ("pem", "crt")),
+            ("续期归档私钥", pki / "renewed" / "private_by_serial", ("key", "pem")),
+            ("续期归档请求", pki / "renewed" / "reqs_by_serial", ("req", "pem")),
+        )
+        for label, directory, extensions in serial_locations:
+            for variant in serial_variants:
+                for extension in extensions:
+                    entries.append((label, directory / f"{variant}.{extension}"))
+
+    unique: list[tuple[str, pathlib.Path]] = []
+    seen: set[pathlib.Path] = set()
+    for label, path in entries:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append((label, path))
+    return unique
+
+
+def remove_client_artifacts(
+    easy_rsa_dir: pathlib.Path,
+    profiles_dir: pathlib.Path,
+    name: str,
+    serial: Any = "",
+) -> list[str]:
+    """Delete a revoked client's generated credentials, failing on errors."""
+    removed: list[str] = []
+    failures: list[str] = []
+    for label, path in client_artifact_entries(easy_rsa_dir, profiles_dir, name, serial):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            failures.append(f"{path.name}: {exc}")
+        else:
+            removed.append(label)
+    if failures:
+        raise AgentError("客户端已吊销，但部分凭据文件删除失败：" + "；".join(failures))
+    return removed
+
+
 def parse_index(
     text: str,
     profiles_dir: pathlib.Path | None = None,
@@ -837,7 +924,7 @@ class OpenVPNController:
             "push_routes": list(self.config.get("push_routes", [])),
         }
 
-    def list_clients(self) -> list[dict[str, Any]]:
+    def _list_clients(self, *, include_inactive: bool = False) -> list[dict[str, Any]]:
         online_records = self._read_status()
         online = {item["name"]: item for item in online_records}
         networks = self._read_client_networks()
@@ -846,7 +933,13 @@ class OpenVPNController:
             network = networks.get(client["name"], {})
             client["lan_subnet"] = network.get("lan_subnet")
             client["share_lan"] = bool(network.get("share_lan", False))
+        if not include_inactive:
+            clients = filter_active_clients(clients)
         return clients
+
+    def list_clients(self) -> list[dict[str, Any]]:
+        """Return usable clients; revoked and expired certificates stay out of the UI."""
+        return self._list_clients()
 
     def status(self) -> dict[str, Any]:
         completed = subprocess.run(
@@ -975,6 +1068,16 @@ class OpenVPNController:
     def sync_runtime(self, *, restart: bool = False) -> dict[str, Any]:
         networks = self._read_client_networks()
         clients = parse_index(self._read_index(), self.profiles_dir)
+        # 清理旧版本留下的吊销客户端凭据；index.txt 和 CRL 必须保留，
+        # 否则后续重新生成 CRL 时可能丢失吊销状态。
+        for client in clients:
+            if client["status"] == "revoked":
+                remove_client_artifacts(
+                    self.easy_rsa_dir,
+                    self.profiles_dir,
+                    client["name"],
+                    client.get("serial", ""),
+                )
         active_clients = [item["name"] for item in clients if item["status"] == "active"]
         self._atomic_text(
             self.openvpn_dir / "server.conf",
@@ -1007,7 +1110,7 @@ class OpenVPNController:
     def create_client(self, name: Any, lan_subnet: Any = "", share_lan: Any = False) -> dict[str, Any]:
         name = validate_client_name(name)
         with MUTATION_LOCK:
-            clients = {item["name"] for item in self.list_clients()}
+            clients = {item["name"] for item in self._list_clients(include_inactive=True)}
             if name in clients:
                 raise AgentError(f"客户端 {name} 已存在或曾经被吊销")
             networks = self._read_client_networks()
@@ -1034,7 +1137,7 @@ class OpenVPNController:
     def set_client_network(self, name: Any, lan_subnet: Any, share_lan: Any) -> dict[str, Any]:
         name = validate_client_name(name)
         with MUTATION_LOCK:
-            clients = {item["name"]: item for item in self.list_clients()}
+            clients = {item["name"]: item for item in self._list_clients(include_inactive=True)}
             if name not in clients or clients[name]["status"] != "active":
                 raise AgentError("只能修改有效客户端的下级内网")
             networks = self._read_client_networks()
@@ -1057,7 +1160,7 @@ class OpenVPNController:
     def revoke_client(self, name: Any) -> dict[str, Any]:
         name = validate_client_name(name)
         with MUTATION_LOCK:
-            clients = {item["name"]: item for item in self.list_clients()}
+            clients = {item["name"]: item for item in self._list_clients(include_inactive=True)}
             if name not in clients:
                 raise AgentError(f"客户端 {name} 不存在")
             if clients[name]["status"] != "active":
@@ -1076,16 +1179,23 @@ class OpenVPNController:
             finally:
                 if os.path.exists(temp_name):
                     os.unlink(temp_name)
-            profile = self.profiles_dir / f"{name}.ovpn"
-            try:
-                profile.unlink()
-            except FileNotFoundError:
-                pass
+            deleted_artifacts = remove_client_artifacts(
+                self.easy_rsa_dir,
+                self.profiles_dir,
+                name,
+                clients[name].get("serial", ""),
+            )
             networks = self._read_client_networks()
             networks.pop(name, None)
             self._write_client_networks(networks)
             self.sync_runtime(restart=True)
-            return {"name": name, "status": "revoked", "revoked_at": utc_now()}
+            return {
+                "name": name,
+                "status": "revoked",
+                "revoked_at": utc_now(),
+                "deleted": True,
+                "deleted_artifacts": deleted_artifacts,
+            }
 
     def restart(self) -> dict[str, Any]:
         self.run(["systemctl", "restart", self.service_name], timeout=60)
@@ -1105,6 +1215,38 @@ class OpenVPNController:
             timeout=30,
         )
         return {"lines": output.splitlines(), "count": count, "checked_at": utc_now()}
+
+    def client_logs(self, name: Any, lines: Any) -> dict[str, Any]:
+        name = validate_client_name(name)
+        if not any(item["name"] == name for item in self.list_clients()):
+            raise AgentError("只能查看有效客户端的日志")
+        try:
+            count = max(20, min(int(lines), 300))
+        except (TypeError, ValueError):
+            count = 120
+        # Read a larger service window before filtering because a busy server
+        # can interleave messages from several clients.
+        journal_count = min(2000, max(240, count * 8))
+        output = self.run(
+            [
+                "journalctl",
+                "-u",
+                self.service_name,
+                "-n",
+                str(journal_count),
+                "--no-pager",
+                "--output=short-iso",
+            ],
+            timeout=30,
+        )
+        matched = filter_client_log_lines(output.splitlines(), name)
+        return {
+            "name": name,
+            "lines": matched[-count:],
+            "count": count,
+            "matched_count": len(matched),
+            "checked_at": utc_now(),
+        }
 
     def get_profile(self, name: Any) -> dict[str, Any]:
         name = validate_client_name(name)
@@ -1346,6 +1488,8 @@ class OpenVPNController:
             return self.restart()
         if action == "logs":
             return self.logs(request.get("lines", 100))
+        if action == "client_logs":
+            return self.client_logs(request.get("name"), request.get("lines", 120))
         if action == "get_profile":
             return self.get_profile(request.get("name"))
         if action == "set_web_password":
@@ -1438,6 +1582,7 @@ def main() -> int:
             "revoke_client",
             "restart",
             "logs",
+            "client_logs",
             "sync_runtime",
             "update_status",
             "start_update",
