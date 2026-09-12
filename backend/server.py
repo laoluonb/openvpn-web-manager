@@ -204,22 +204,22 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.14-test-demo",
+            "manager_version": "1.2.14-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.update_check = {
-            "current_manager_version": "1.2.14-test-demo",
-            "latest_manager_version": "v1.2.14-test-demo",
+            "current_manager_version": "1.2.14-demo",
+            "latest_manager_version": "v1.2.14-demo",
             "current_openvpn_version": "2.6 demo",
             "installed_openvpn_version": "2.6 demo",
             "candidate_openvpn_version": "2.6 demo",
             "manager_update_available": False,
             "openvpn_update_available": False,
             "update_available": False,
-            "release_name": "v1.2.14-test：在线更新修复验证版",
-            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.14-test",
+            "release_name": "v1.2.14：在线更新稳定版",
+            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.14",
             "release_published_at": "2026-09-12T00:00:00Z",
-            "release_notes": "用于验证从 v1.2.12 到测试版的完整在线更新流程。\n升级后应保留 VPN 端口、CA、客户端及面板配置。",
+            "release_notes": "修复在线更新状态码 127、重复重装和错误诊断问题。\n升级时保留 VPN 端口、CA、客户端及面板配置。",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         self.clients = [
