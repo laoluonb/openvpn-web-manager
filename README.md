@@ -285,10 +285,16 @@ sudo openvpn-manager revoke branch-a
 sudo openvpn-manager logs 100
 sudo openvpn-manager edit-settings
 sudo openvpn-manager panel-status
+sudo openvpn-manager web-settings
+sudo openvpn-manager web-credentials
 sudo openvpn-manager restart
 sudo openvpn-manager update
 sudo openvpn-manager update-status
 ```
+
+`web-settings` 只显示面板用户名、会话时长、HTTPS 端口、访问来源、TLS 证书路径和服务状态，
+不会输出密码明文或密码哈希。`web-credentials` 使用隐藏输入修改用户名和密码，保存后会重启
+管理面板并使已有登录会话失效；密码留空时只修改用户名。
 
 `profile` 输出包含私钥，请勿将结果写入不受保护的日志。生成的客户端文件位于
 `/var/lib/openvpn-manager/clients/`，默认仅 root 和服务组可读。

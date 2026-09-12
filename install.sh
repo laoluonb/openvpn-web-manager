@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.9"
+APP_VERSION="1.2.11"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -757,7 +757,7 @@ pathlib.Path(path).write_text(json.dumps({
 }, indent=2) + "\n", encoding="utf-8")
 PY
   cat >"$CREDENTIAL_FILE" <<EOF
-OpenVPN 管理中心 $VERSION
+OpenVPN 管理中心 $APP_VERSION
 管理地址：https://$ENDPOINT:$WEB_PORT
 用户名：$ADMIN_USER
 密码：$ADMIN_PASSWORD
@@ -845,7 +845,7 @@ systemctl is-active --quiet openvpn-server@server.service || die "OpenVPN 启动
 systemctl is-active --quiet openvpn-manager-agent.service || die "管理代理启动失败。"
 systemctl is-active --quiet openvpn-web-manager.service || die "管理 Web 服务启动失败。"
 
-python3 - "$CONFIG_DIR/install-state.json" "$VERSION" "$EXISTING_ACTION" "$EXISTING_BACKUP" <<'PY'
+python3 - "$CONFIG_DIR/install-state.json" "$APP_VERSION" "$EXISTING_ACTION" "$EXISTING_BACKUP" <<'PY'
 import datetime, json, pathlib, sys
 path, version, existing_action, backup = sys.argv[1:]
 data = {

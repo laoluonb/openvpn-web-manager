@@ -204,22 +204,22 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.10-demo",
+            "manager_version": "1.2.11-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.update_check = {
-            "current_manager_version": "1.2.10-demo",
-            "latest_manager_version": "v1.2.10-demo",
+            "current_manager_version": "1.2.11-demo",
+            "latest_manager_version": "v1.2.11-demo",
             "current_openvpn_version": "2.6 demo",
             "installed_openvpn_version": "2.6 demo",
             "candidate_openvpn_version": "2.6 demo",
             "manager_update_available": False,
             "openvpn_update_available": False,
             "update_available": False,
-            "release_name": "v1.2.10：修复一键更新状态码 127",
-            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.10",
+            "release_name": "v1.2.11：更新不再改变 VPN 端口",
+            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.11",
             "release_published_at": "2026-09-12T00:00:00Z",
-            "release_notes": "修复 systemd 环境下一键更新可能返回状态码 127 的问题。\n统一命令路径并增强安装失败诊断；在线更新继续保留 VPN 端口和服务端参数。",
+            "release_notes": "一键更新改为只执行保留配置的升级流程，不再重新传入或随机化 VPN 端口。\n修复异常版本字符串触发 dpkg 报错的问题，并继续保留 VPN 端口和服务端参数。",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         self.clients = [
@@ -279,7 +279,7 @@ class DemoAgent:
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
             **self.settings,
-            "manager_version": "1.2.10-demo",
+            "manager_version": "1.2.11-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -445,6 +445,24 @@ DEMO-TLS-CRYPT
                 }
             if action == "set_web_password":
                 return {"changed": True}
+            if action == "web_settings":
+                return {
+                    "admin_user": "admin",
+                    "session_hours": 8,
+                    "password_configured": True,
+                    "web_port": 8443,
+                    "web_allow": "0.0.0.0/0",
+                    "tls_certificate": "/etc/openvpn-manager/tls/server.crt",
+                    "web_service": "active",
+                }
+            if action == "set_web_credentials":
+                username = str(payload.get("username", ""))
+                return {
+                    "changed": True,
+                    "admin_user": username,
+                    "password_changed": bool(payload.get("password_hash")),
+                    "message": "面板登录配置已更新，现有登录会话已失效，请使用新凭据重新登录。",
+                }
             if action == "update_status":
                 return dict(self.update_state)
             if action == "check_updates":
@@ -454,9 +472,9 @@ DEMO-TLS-CRYPT
                 self.update_state = {
                     "state": "completed",
                     "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
-                    "manager_version": "1.2.10-demo",
+                    "manager_version": "1.2.11-demo",
                     "openvpn_version": "OpenVPN 2.6 demo",
-                    "target_version": "v1.2.10-demo",
+                    "target_version": "v1.2.11-demo",
                 }
                 return dict(self.update_state)
             raise APIError("不支持此演示操作")
@@ -502,7 +520,7 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "OpenVPNWebManager/1.2.10"
+    server_version = "OpenVPNWebManager/1.2.11"
     context: AppContext
 
     def log_message(self, fmt: str, *args: Any) -> None:

@@ -102,7 +102,9 @@ class InstallerRegressionTests(unittest.TestCase):
         agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.9"', installer)
+        self.assertIn('APP_VERSION="1.2.11"', installer)
+        self.assertNotIn('\nVERSION="1.2.11"', installer)
+        self.assertIn('"$APP_VERSION" "$EXISTING_ACTION"', installer)
         self.assertIn('CLI_COMMAND="/usr/local/bin/openvpn-manager"', installer)
         self.assertIn("cleanup_legacy_cli_commands", installer)
         self.assertNotIn("install_cli_alias", installer)
@@ -119,13 +121,15 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertIn('export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"', updater)
         self.assertIn('/bin/bash "$SOURCE_DIR/install.sh"', updater)
         self.assertIn('INSTALL_LOG="$WORK_DIR/install.log"', updater)
+        self.assertIn('2>&1 | tee "$INSTALL_LOG"', updater)
+        self.assertIn('INSTALL_EXIT_CODE=${PIPESTATUS[0]}', updater)
         self.assertIn('FAILURE_DETAIL=', updater)
         self.assertIn("--existing-action preserve", updater)
-        self.assertIn('data.get("vpn_port", 1194)', updater)
-        self.assertIn('--vpn-port "${SETTINGS[1]}"', updater)
+        self.assertNotIn('data.get("vpn_port", 1194)', updater)
+        self.assertNotIn('--vpn-port "${SETTINGS[1]}"', updater)
         self.assertNotIn("--vpn-port random", updater)
-        self.assertIn("--vpn-protocol", updater)
-        self.assertIn("--vpn-subnet", updater)
+        self.assertNotIn("--vpn-protocol", updater)
+        self.assertNotIn("--vpn-subnet", updater)
         self.assertIn("更新包包含不允许的特殊文件", updater)
 
     def test_managed_upgrade_preserves_unset_server_parameters_and_port(self) -> None:
@@ -151,6 +155,7 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertIn("dpkg --compare-versions", updater)
         self.assertIn("已拒绝降级", updater)
         self.assertIn("re.fullmatch", updater)
+        self.assertIn('version = str(data.get("version", "")).strip().removeprefix("v")', updater)
 
     def test_agent_can_reset_openvpn_address_pool(self) -> None:
         service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
@@ -206,6 +211,19 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertNotIn("sudo bt", readme)
         self.assertIn('LEGACY_CLI_COMMAND="/usr/local/bin/openvpn-managerctl"', uninstaller)
         self.assertIn('LEGACY_CLI_ALIAS="/usr/local/bin/bt"', uninstaller)
+
+    def test_cli_can_view_and_change_dashboard_credentials(self) -> None:
+        cli = (ROOT / "scripts/openvpn-manager").read_text(encoding="utf-8")
+        agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
+        self.assertIn('sub.add_parser("web-settings"', cli)
+        self.assertIn('sub.add_parser("web-credentials"', cli)
+        self.assertIn('getpass.getpass("新面板密码（留空表示不修改）：")', cli)
+        self.assertIn('"action": "set_web_credentials"', cli)
+        self.assertIn('if action == "web_settings"', agent)
+        self.assertIn('if action == "set_web_credentials"', agent)
+        self.assertIn('self.run(["systemctl", "restart", "openvpn-web-manager.service"]', agent)
+        self.assertIn('web_config["session_secret"] = os.urandom(32).hex()', agent)
+        self.assertIn("密码：已修改，出于安全原因未保存明文", agent)
 
 
 if __name__ == "__main__":

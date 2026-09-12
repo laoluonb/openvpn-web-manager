@@ -41,8 +41,12 @@ except ModuleNotFoundError:  # pragma: no cover - production target is Linux
 
 CONFIG_PATH = os.environ.get("OPENVPN_MANAGER_CONFIG", "/etc/openvpn-manager/server.json")
 WEB_CONFIG_PATH = os.environ.get("OPENVPN_MANAGER_WEB_CONFIG", "/etc/openvpn-manager/web.json")
+CREDENTIAL_FILE_PATH = os.environ.get(
+    "OPENVPN_MANAGER_CREDENTIAL_FILE", "/root/openvpn-manager-credentials.txt"
+)
 SOCKET_PATH = os.environ.get("OPENVPN_MANAGER_SOCKET", "/run/openvpn-manager/agent.sock")
 CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+WEB_USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 DOMAIN_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 PASSWORD_HASH_RE = re.compile(r"^scrypt\$16384\$8\$1\$[A-Za-z0-9_-]{16,}\$[A-Za-z0-9_-]{32,}$")
 MUTATION_LOCK = threading.Lock()
@@ -1019,7 +1023,8 @@ class OpenVPNController:
             value = load_json(self.install_state_path).get("version")
         except AgentError:
             return "未知"
-        return str(value or "未知")
+        normalized = str(value or "").strip().removeprefix("v")
+        return str(value).strip() if parse_semantic_version(normalized) is not None else "未知"
 
     def server_settings(self) -> dict[str, Any]:
         return {
@@ -1779,7 +1784,78 @@ class OpenVPNController:
             web_config = load_json(WEB_CONFIG_PATH)
             web_config["password_hash"] = encoded_hash
             self._atomic_json(pathlib.Path(WEB_CONFIG_PATH), web_config, group_name=self.web_group)
+            self._update_credential_record(web_config, password_changed=True)
         return {"changed": True, "changed_at": utc_now()}
+
+    def _update_credential_record(
+        self, web_config: dict[str, Any], *, password_changed: bool
+    ) -> None:
+        target = pathlib.Path(CREDENTIAL_FILE_PATH)
+        if not target.exists():
+            return
+        try:
+            lines = target.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            raise AgentError(f"无法更新控制台凭据记录：{exc}") from exc
+        output: list[str] = []
+        username_written = False
+        password_written = False
+        for line in lines:
+            if line.startswith("用户名："):
+                output.append(f"用户名：{web_config.get('admin_user', '')}")
+                username_written = True
+            elif password_changed and line.startswith("密码："):
+                output.append("密码：已修改，出于安全原因未保存明文")
+                password_written = True
+            else:
+                output.append(line)
+        if not username_written:
+            output.append(f"用户名：{web_config.get('admin_user', '')}")
+        if password_changed and not password_written:
+            output.append("密码：已修改，出于安全原因未保存明文")
+        self._atomic_text(target, "\n".join(output) + "\n", mode=0o600)
+
+    def web_settings(self) -> dict[str, Any]:
+        web_config = load_json(WEB_CONFIG_PATH)
+        password_hash = str(web_config.get("password_hash", ""))
+        return {
+            "admin_user": str(web_config.get("admin_user", "")),
+            "session_hours": int(web_config.get("session_hours", 8)),
+            "password_configured": bool(PASSWORD_HASH_RE.fullmatch(password_hash)),
+            "web_port": int(self.config["web_port"]),
+            "web_allow": self.config.get("web_allow", "0.0.0.0/0"),
+            "tls_certificate": "/etc/openvpn-manager/tls/server.crt",
+            "web_service": self.panel_status().get("web_service", "unknown"),
+        }
+
+    def set_web_credentials(self, username: Any, encoded_hash: Any = None) -> dict[str, Any]:
+        if not isinstance(username, str) or not WEB_USERNAME_RE.fullmatch(username):
+            raise AgentError(
+                "面板用户名必须以字母或数字开头，仅能包含字母、数字、点、下划线和短横线，最长 32 个字符"
+            )
+        if encoded_hash is not None and (
+            not isinstance(encoded_hash, str) or not PASSWORD_HASH_RE.fullmatch(encoded_hash)
+        ):
+            raise AgentError("密码哈希格式无效")
+        with MUTATION_LOCK:
+            web_config = load_json(WEB_CONFIG_PATH)
+            web_config["admin_user"] = username
+            if encoded_hash is not None:
+                web_config["password_hash"] = encoded_hash
+            web_config["session_secret"] = os.urandom(32).hex()
+            self._atomic_json(pathlib.Path(WEB_CONFIG_PATH), web_config, group_name=self.web_group)
+            self._update_credential_record(
+                web_config,
+                password_changed=encoded_hash is not None,
+            )
+        self.run(["systemctl", "restart", "openvpn-web-manager.service"], timeout=60)
+        return {
+            "changed": True,
+            "admin_user": username,
+            "password_changed": encoded_hash is not None,
+            "message": "面板登录配置已更新，现有登录会话已失效，请使用新凭据重新登录。",
+            "changed_at": utc_now(),
+        }
 
     def dispatch(self, request: dict[str, Any]) -> Any:
         action = request.get("action")
@@ -1833,6 +1909,13 @@ class OpenVPNController:
             return self.get_profile(request.get("name"))
         if action == "set_web_password":
             return self.set_web_password(request.get("password_hash"))
+        if action == "web_settings":
+            return self.web_settings()
+        if action == "set_web_credentials":
+            return self.set_web_credentials(
+                request.get("username"),
+                request.get("password_hash"),
+            )
         if action == "update_status":
             return self.update_status()
         if action == "check_updates":
@@ -1936,6 +2019,7 @@ def main() -> int:
             "update_status",
             "check_updates",
             "start_update",
+            "web_settings",
         ],
     )
     parser.add_argument("--name")

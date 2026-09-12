@@ -9,9 +9,13 @@ openvpn-manager-agent 的 Unix 域套接字执行。
 from __future__ import annotations
 
 import argparse
+import base64
+import getpass
+import hashlib
 import json
 import os
 import re
+import secrets
 import socket
 import sys
 import textwrap
@@ -19,6 +23,16 @@ from typing import Any
 
 
 SOCKET_PATH = os.environ.get("OPENVPN_MANAGER_SOCKET", "/run/openvpn-manager/agent.sock")
+
+
+def b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return f"scrypt$16384$8$1${b64encode(salt)}${b64encode(digest)}"
 
 
 def request(payload: dict[str, Any]) -> Any:
@@ -135,6 +149,50 @@ def show_settings(settings: dict[str, Any]) -> None:
         if isinstance(value, list):
             value = ", ".join(str(item) for item in value) or "—"
         print(f"{label}：{value_or_dash(value)}")
+
+
+def show_web_settings(settings: dict[str, Any]) -> None:
+    password_status = "已配置（不会显示密码明文或哈希）" if settings.get("password_configured") else "未正确配置"
+    print(f"面板用户名：{value_or_dash(settings.get('admin_user'))}")
+    print(f"密码状态：{password_status}")
+    print(f"会话有效期：{value_or_dash(settings.get('session_hours'))} 小时")
+    print(f"HTTPS 端口：{value_or_dash(settings.get('web_port'))}")
+    print(f"允许来源：{value_or_dash(settings.get('web_allow'))}")
+    print(f"TLS 证书：{value_or_dash(settings.get('tls_certificate'))}")
+    print(f"面板服务：{value_or_dash(settings.get('web_service'))}")
+
+
+def edit_web_credentials(*, username: str | None = None) -> None:
+    current = request({"action": "web_settings"})
+    current_user = str(current.get("admin_user") or "admin")
+    new_user = username.strip() if isinstance(username, str) else input(f"新面板用户名 [{current_user}]：").strip()
+    new_user = new_user or current_user
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}", new_user):
+        raise ValueError("用户名格式无效：请使用字母、数字、点、下划线或短横线，最长 32 个字符")
+    new_password = getpass.getpass("新面板密码（留空表示不修改）：")
+    encoded_hash = None
+    if new_password:
+        if len(new_password) < 12 or len(new_password) > 128:
+            raise ValueError("面板密码长度必须为 12 到 128 个字符")
+        confirmation = getpass.getpass("再次输入新密码：")
+        if new_password != confirmation:
+            raise ValueError("两次输入的密码不一致")
+        encoded_hash = hash_password(new_password)
+    if new_user == current_user and encoded_hash is None:
+        print("没有修改用户名或密码。")
+        return
+    print(f"\n用户名：{current_user} → {new_user}")
+    if encoded_hash is not None:
+        print("密码：将更新（不会显示明文）")
+    if input("确认保存并重启管理面板？请输入 YES：").strip() != "YES":
+        print("已取消。")
+        return
+    result = request({
+        "action": "set_web_credentials",
+        "username": new_user,
+        "password_hash": encoded_hash,
+    })
+    print(result.get("message") or "面板登录配置已更新，现有登录会话已失效，请使用新凭据重新登录。")
 
 
 def prompt_setting(label: str, current: Any, *, clearable: bool = False) -> Any:
@@ -319,6 +377,10 @@ def handle_choice(choice: str) -> bool:
         print_update_status(request({"action": "start_update"}))
     elif choice == "23":
         print_update_status(request({"action": "update_status"}))
+    elif choice == "24":
+        show_web_settings(request({"action": "web_settings"}))
+    elif choice == "25":
+        edit_web_credentials()
     else:
         print("无效选项，请重新输入。")
     return True
@@ -342,7 +404,8 @@ def menu_header() -> None:
     print("(17) 查看服务端设置                       (18) 修改服务端设置")
     print("(19) 查看 OpenVPN 日志                    (20) 查看客户端日志")
     print("(21) 检查远程更新                         (22) 更新面板与 OpenVPN")
-    print("(23) 查看更新任务状态")
+    print("(23) 查看更新任务状态                     (24) 查看面板配置")
+    print("(25) 修改面板用户名和密码")
     print(f"{yellow}(0) 退出{reset}")
     print(f"{cyan}{'=' * 78}{reset}")
 
@@ -389,7 +452,7 @@ def numeric_shortcut(choice: str) -> int:
 def main() -> int:
     if len(sys.argv) == 1:
         return interactive_menu()
-    if sys.argv[1].isdigit() and 0 <= int(sys.argv[1]) <= 23:
+    if sys.argv[1].isdigit() and 0 <= int(sys.argv[1]) <= 25:
         return numeric_shortcut(sys.argv[1])
 
     parser = argparse.ArgumentParser(description="管理本机 OpenVPN 服务")
@@ -403,6 +466,9 @@ def main() -> int:
     sub.add_parser("stop", help="停止 OpenVPN")
     sub.add_parser("apply", aliases=["reload"], help="重新生成配置并重启 OpenVPN")
     sub.add_parser("settings", help="查看服务端设置")
+    sub.add_parser("web-settings", help="查看面板配置（不会显示密码明文或哈希）")
+    web_credentials = sub.add_parser("web-credentials", help="修改面板用户名和密码")
+    web_credentials.add_argument("--username", help="新面板用户名；省略时交互输入")
     sub.add_parser("check-update", help="强制检查远程版本与更新日志")
     sub.add_parser("edit-settings", help="交互式修改服务端设置")
     sub.add_parser("status")
@@ -440,6 +506,13 @@ def main() -> int:
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"错误：{exc}", file=sys.stderr)
             return 1
+    if args.command == "web-credentials":
+        try:
+            edit_web_credentials(username=args.username)
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"错误：{exc}", file=sys.stderr)
+            return 1
 
     actions: dict[str, dict[str, Any]] = {
         "status": {"action": "status"},
@@ -453,6 +526,7 @@ def main() -> int:
         "panel-restart": {"action": "panel_restart"},
         "panel-reload": {"action": "panel_restart"},
         "settings": {"action": "server_settings"},
+        "web-settings": {"action": "web_settings"},
         "check-update": {"action": "check_updates", "force": True},
         "list": {"action": "list_clients"},
         "create": {
@@ -505,6 +579,8 @@ def main() -> int:
         show_clients(result)
     elif args.command == "settings":
         show_settings(result)
+    elif args.command == "web-settings":
+        show_web_settings(result)
     elif args.command in {"logs", "client-logs"}:
         print_logs(result)
     elif args.command == "check-update":
