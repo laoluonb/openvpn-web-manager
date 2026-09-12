@@ -4,7 +4,7 @@ set -Eeuo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 APP_NAME="openvpn-web-manager"
-APP_VERSION="1.2.13-test"
+APP_VERSION="1.2.14-test"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -882,5 +882,3 @@ fi
 if [[ -z "$TLS_CERT" ]]; then
   warn "已安装自签名 TLS 证书，生产环境请替换为受信任证书。"
 fi
-
-\n
