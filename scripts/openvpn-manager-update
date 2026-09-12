@@ -139,7 +139,51 @@ if re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z.-]+)?", version):
     print(version)
 PY
 )"
-if [[ -n "$CURRENT_VERSION" ]] && dpkg --compare-versions "${TARGET_VERSION#v}" lt "$CURRENT_VERSION"; then
+MANAGER_VERSION_COMPARE="$(python3 - "${TARGET_VERSION#v}" "$CURRENT_VERSION" <<'PY'
+import re
+import sys
+
+pattern = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
+)
+
+def parse(value):
+    match = pattern.fullmatch(value)
+    if not match:
+        return None
+    prerelease = tuple(match.group(4).split(".")) if match.group(4) else ()
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)), prerelease)
+
+def compare(left, right):
+    if left[:3] != right[:3]:
+        return -1 if left[:3] < right[:3] else 1
+    left_pre, right_pre = left[3], right[3]
+    if not left_pre and not right_pre:
+        return 0
+    if not left_pre:
+        return 1
+    if not right_pre:
+        return -1
+    for left_id, right_id in zip(left_pre, right_pre):
+        if left_id == right_id:
+            continue
+        left_numeric, right_numeric = left_id.isdigit(), right_id.isdigit()
+        if left_numeric and right_numeric:
+            return -1 if int(left_id) < int(right_id) else 1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return -1 if left_id < right_id else 1
+    if len(left_pre) == len(right_pre):
+        return 0
+    return -1 if len(left_pre) < len(right_pre) else 1
+
+target = parse(sys.argv[1])
+current = parse(sys.argv[2]) if sys.argv[2] else None
+print(compare(target, current) if target is not None and current is not None else 1)
+PY
+)"
+if [[ -n "$CURRENT_VERSION" && "$MANAGER_VERSION_COMPARE" == "-1" ]]; then
   write_status "failed" "GitHub 最新稳定版 $TARGET_VERSION 低于当前版本 v$CURRENT_VERSION，已拒绝降级。" "$TARGET_VERSION"
   UPDATE_FINISHED="1"
   exit 1
@@ -180,8 +224,7 @@ if [[ -n "$OPENVPN_INSTALLED" && -n "$OPENVPN_CANDIDATE" ]] \
   OPENVPN_UPDATE_AVAILABLE="1"
 fi
 
-if [[ -n "$CURRENT_VERSION" ]] \
-  && dpkg --compare-versions "${TARGET_VERSION#v}" eq "$CURRENT_VERSION"; then
+if [[ -n "$CURRENT_VERSION" && "$MANAGER_VERSION_COMPARE" == "0" ]]; then
   if [[ "$OPENVPN_UPDATE_AVAILABLE" != "1" ]]; then
     UPDATE_FINISHED="1"
     write_status "completed" "管理面板 $TARGET_VERSION 与 OpenVPN 均已是最新版本，无需重复安装；现有 VPN 端口和配置未作修改。" "$TARGET_VERSION"

@@ -102,7 +102,7 @@ class InstallerRegressionTests(unittest.TestCase):
         agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('APP_VERSION="1.2.14"', installer)
+        self.assertIn('APP_VERSION="1.2.15"', installer)
         self.assertNotRegex(installer, r"(?m)^\\n$")
         self.assertNotIn('\nVERSION="1.2.11"', installer)
         self.assertIn('"$APP_VERSION" "$EXISTING_ACTION"', installer)
@@ -160,6 +160,9 @@ class InstallerRegressionTests(unittest.TestCase):
         self.assertIn("已拒绝降级", updater)
         self.assertIn("re.fullmatch", updater)
         self.assertIn('version = str(data.get("version", "")).strip().removeprefix("v")', updater)
+        self.assertIn('MANAGER_VERSION_COMPARE=', updater)
+        self.assertIn('if not left_pre:', updater)
+        self.assertNotIn('dpkg --compare-versions "${TARGET_VERSION#v}" lt "$CURRENT_VERSION"', updater)
 
     def test_agent_can_reset_openvpn_address_pool(self) -> None:
         service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
