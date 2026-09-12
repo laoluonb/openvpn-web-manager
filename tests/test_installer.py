@@ -102,7 +102,7 @@ class InstallerRegressionTests(unittest.TestCase):
         agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('APP_VERSION="1.2.12"', installer)
+        self.assertIn('APP_VERSION="1.2.13-test"', installer)
         self.assertNotIn('\nVERSION="1.2.11"', installer)
         self.assertIn('"$APP_VERSION" "$EXISTING_ACTION"', installer)
         self.assertIn('CLI_COMMAND="/usr/local/bin/openvpn-manager"', installer)
