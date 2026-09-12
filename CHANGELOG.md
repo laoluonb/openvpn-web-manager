@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.2.4 - 2026-09-12
+
+- 修复 OpenVPN 2.6 `status-version 3` 使用制表符分隔字段而后端按逗号解析，导致日志显示已连接但
+  客户端页面全部显示“离线”的问题。
+- 修复 `/etc/openvpn/server` 父目录不可遍历导致 `ccd/ikuai` 和 `ccd/DEFAULT` 报 `Permission denied`；
+  仅增加目录遍历权限，不放开目录列表或私钥读取权限。
+
 ## 1.2.3 - 2026-09-12
 
 - 修复 OpenVPN 重启后 `/run/openvpn-manager` 被 systemd 重新创建为错误属主，导致 Web 页面无法连接

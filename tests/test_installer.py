@@ -102,7 +102,7 @@ class InstallerRegressionTests(unittest.TestCase):
         agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.3"', installer)
+        self.assertIn('VERSION="1.2.4"', installer)
         self.assertIn('agent.py" --direct sync_runtime', installer)
         self.assertIn("openvpn-manager-update.service", installer)
         self.assertIn('config/openvpn-manager.tmpfiles" /etc/tmpfiles.d/openvpn-manager.conf', installer)
@@ -152,6 +152,8 @@ class InstallerRegressionTests(unittest.TestCase):
         installer = (ROOT / "install.sh").read_text(encoding="utf-8")
         agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
         self.assertIn('install -d -m 0750 -o root -g nogroup "$OPENVPN_DIR/ccd"', installer)
+        self.assertIn('install -d -m 0751 "$OPENVPN_DIR"', installer)
+        self.assertIn("stat.S_IXOTH", agent)
         self.assertIn('os.chown(ccd_dir, 0, group_gid("nogroup"))', agent)
         self.assertIn('mode=0o640, group_name="nogroup"', agent)
 

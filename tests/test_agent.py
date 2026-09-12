@@ -28,8 +28,8 @@ class AgentParsingTests(unittest.TestCase):
         text = "\n".join(
             [
                 "TITLE,OpenVPN 2.6",
-                "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,Connected Since (time_t),Username,Client ID,Peer ID,Data Channel Cipher",
-                "CLIENT_LIST,ethan-laptop,203.0.113.8:55000,10.8.0.2,,2048,4096,2026-09-11 10:00:00,1789120800,UNDEF,0,0,AES-256-GCM",
+                "HEADER\tCLIENT_LIST\tCommon Name\tReal Address\tVirtual Address\tVirtual IPv6 Address\tBytes Received\tBytes Sent\tConnected Since\tConnected Since (time_t)\tUsername\tClient ID\tPeer ID\tData Channel Cipher",
+                "CLIENT_LIST\tethan-laptop\t203.0.113.8:55000\t10.8.0.2\t\t2048\t4096\t2026-09-11 10:00:00\t1789120800\tUNDEF\t0\t0\tAES-256-GCM",
                 "END",
             ]
         )
@@ -39,6 +39,18 @@ class AgentParsingTests(unittest.TestCase):
         self.assertEqual(parsed[0]["virtual_address"], "10.8.0.2")
         self.assertEqual(parsed[0]["bytes_sent"], 4096)
         self.assertEqual(parsed[0]["cipher"], "AES-256-GCM")
+
+    def test_status_parser_keeps_legacy_comma_format(self) -> None:
+        text = "\n".join(
+            [
+                "HEADER,CLIENT_LIST,Common Name,Real Address,Virtual Address,Virtual IPv6 Address,Bytes Received,Bytes Sent,Connected Since,Client ID,Peer ID,Data Channel Cipher",
+                "CLIENT_LIST,legacy-client,198.51.100.8:1194,10.8.0.9,,12,34,2026-09-12 01:00:00,1,2,AES-256-GCM",
+            ]
+        )
+        parsed = parse_status(text)
+        self.assertEqual(parsed[0]["name"], "legacy-client")
+        self.assertEqual(parsed[0]["virtual_address"], "10.8.0.9")
+        self.assertEqual(parsed[0]["bytes_received"], 12)
 
     def test_easy_rsa_index(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

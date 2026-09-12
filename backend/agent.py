@@ -19,6 +19,7 @@ import shlex
 import shutil
 import socket
 import socketserver
+import stat
 import struct
 import subprocess
 import sys
@@ -226,12 +227,17 @@ def parse_time(value: str) -> str | None:
 
 
 def parse_status(text: str) -> list[dict[str, Any]]:
-    """Parse OpenVPN status-version 3 CSV into online-client records."""
+    """Parse OpenVPN status output from both comma and tab CSV formats."""
     headers: list[str] | None = None
     clients: list[dict[str, Any]] = []
-    for row in csv.reader(text.splitlines()):
+    for raw_line in text.splitlines():
+        if not raw_line:
+            continue
+        line = raw_line.lstrip("\ufeff")
+        delimiter = "\t" if "\t" in line else ","
+        row = next(csv.reader([line], delimiter=delimiter), [])
         if len(row) >= 3 and row[0] == "HEADER" and row[1] == "CLIENT_LIST":
-            headers = row[2:]
+            headers = [item.strip() for item in row[2:]]
             continue
         if not row or row[0] != "CLIENT_LIST":
             continue
@@ -738,6 +744,15 @@ class OpenVPNController:
         networks: dict[str, dict[str, Any]],
         active_clients: list[str],
     ) -> None:
+        # OpenVPN reads CCD files after dropping to nobody:nogroup.  Ensure
+        # the parent directories are traversable without making them listable.
+        for parent in (self.openvpn_dir.parent, self.openvpn_dir):
+            try:
+                mode = stat.S_IMODE(parent.stat().st_mode)
+                if not mode & stat.S_IXOTH:
+                    os.chmod(parent, mode | stat.S_IXOTH)
+            except OSError as exc:
+                raise AgentError(f"无法为 OpenVPN CCD 设置目录遍历权限：{exc}") from exc
         ccd_dir = self.openvpn_dir / "ccd"
         ccd_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
         # OpenVPN reads CCD files when a client connects, after dropping to

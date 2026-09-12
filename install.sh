@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.3"
+VERSION="1.2.4"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -518,7 +518,8 @@ find "$INSTALL_DIR" -type f -exec chmod 0644 {} +
 
 install -d -m 0750 -o root -g "$WEB_GROUP" "$CONFIG_DIR" "$CONFIG_DIR/tls"
 install -d -m 0750 -o root -g "$WEB_GROUP" "$STATE_DIR" "$STATE_DIR/clients"
-install -d -m 0750 "$OPENVPN_DIR" "$EASYRSA_DIR"
+install -d -m 0751 "$OPENVPN_DIR"
+install -d -m 0750 "$EASYRSA_DIR"
 install -d -m 0750 -o root -g nogroup "$OPENVPN_DIR/ccd"
 install -d -m 0770 -o root -g nogroup /var/log/openvpn /var/lib/openvpn/server
 
