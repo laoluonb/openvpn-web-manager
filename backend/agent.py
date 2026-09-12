@@ -1474,6 +1474,88 @@ class OpenVPNController:
             "disconnected_at": utc_now(),
         }
 
+    def start(self) -> dict[str, Any]:
+        """Start the firewall and OpenVPN units without changing configuration."""
+        self.run(["systemctl", "start", "openvpn-manager-firewall.service"], timeout=60)
+        self.run(["systemctl", "start", self.service_name], timeout=60)
+        time.sleep(0.4)
+        state = self.status()
+        if not state["healthy"]:
+            raise AgentError(f"OpenVPN 启动后服务状态为 {state['service']}")
+        state["operation"] = "start"
+        return state
+
+    def stop(self) -> dict[str, Any]:
+        """Stop OpenVPN and remove this project's forwarding rules; keep the agent available."""
+        self.run(["systemctl", "stop", self.service_name], timeout=60)
+        self.run(["systemctl", "stop", "openvpn-manager-firewall.service"], timeout=60)
+        time.sleep(0.2)
+        state = self.status()
+        state["operation"] = "stop"
+        return state
+
+    def apply_config(self) -> dict[str, Any]:
+        """Regenerate managed files, refresh firewall rules, and restart OpenVPN."""
+        state = self.sync_runtime(restart=True)
+        state["operation"] = "apply"
+        return state
+
+    def panel_status(self) -> dict[str, Any]:
+        def unit_state(unit: str) -> str:
+            completed = subprocess.run(
+                ["systemctl", "is-active", unit],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=15,
+            )
+            return completed.stdout.strip() or "unknown"
+
+        web_state = unit_state("openvpn-web-manager.service")
+        nginx_state = unit_state("nginx.service")
+        return {
+            "web_service": web_state,
+            "web_healthy": web_state == "active",
+            "nginx_service": nginx_state,
+            "nginx_healthy": nginx_state == "active",
+            "checked_at": utc_now(),
+        }
+
+    def panel_restart(self) -> dict[str, Any]:
+        """Restart the dashboard and reload nginx without touching OpenVPN."""
+        self.run(["systemctl", "restart", "openvpn-web-manager.service"], timeout=60)
+        self.run(["systemctl", "reload", "nginx.service"], timeout=60)
+        time.sleep(0.3)
+        result = self.panel_status()
+        if not result["web_healthy"] or not result["nginx_healthy"]:
+            raise AgentError(
+                f"管理面板重启后状态异常：面板 {result['web_service']}，Nginx {result['nginx_service']}"
+            )
+        result["operation"] = "panel-restart"
+        return result
+
+    def panel_start(self) -> dict[str, Any]:
+        """Start the dashboard service and ensure nginx is running."""
+        self.run(["systemctl", "start", "nginx.service"], timeout=60)
+        self.run(["systemctl", "start", "openvpn-web-manager.service"], timeout=60)
+        time.sleep(0.3)
+        result = self.panel_status()
+        if not result["web_healthy"] or not result["nginx_healthy"]:
+            raise AgentError(
+                f"管理面板启动后状态异常：面板 {result['web_service']}，Nginx {result['nginx_service']}"
+            )
+        result["operation"] = "panel-start"
+        return result
+
+    def panel_stop(self) -> dict[str, Any]:
+        """Stop only this project's dashboard service, not the shared nginx daemon."""
+        self.run(["systemctl", "stop", "openvpn-web-manager.service"], timeout=60)
+        time.sleep(0.2)
+        result = self.panel_status()
+        result["operation"] = "panel-stop"
+        return result
+
     def update_server_settings(self, requested: Any) -> dict[str, Any]:
         if not isinstance(requested, dict):
             raise AgentError("服务端设置必须是 JSON 对象")
@@ -1723,6 +1805,20 @@ class OpenVPNController:
             return self.disconnect_client(request.get("name"))
         if action == "revoke_client":
             return self.revoke_client(request.get("name"))
+        if action == "start":
+            return self.start()
+        if action == "stop":
+            return self.stop()
+        if action in {"apply", "reload"}:
+            return self.apply_config()
+        if action == "panel_status":
+            return self.panel_status()
+        if action == "panel_start":
+            return self.panel_start()
+        if action == "panel_stop":
+            return self.panel_stop()
+        if action == "panel_restart":
+            return self.panel_restart()
         if action == "server_settings":
             return self.server_settings()
         if action == "update_server_settings":
@@ -1825,6 +1921,14 @@ def main() -> int:
             "set_client_network",
             "disconnect_client",
             "revoke_client",
+            "start",
+            "stop",
+            "apply",
+            "reload",
+            "panel_status",
+            "panel_start",
+            "panel_stop",
+            "panel_restart",
             "restart",
             "logs",
             "client_logs",

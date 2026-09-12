@@ -222,9 +222,49 @@ journalctl -u openvpn-manager-update.service -n 200 --no-pager
 
 ## 命令行管理
 
-本机 CLI 与 Web 控制台使用同一个权限隔离代理：
+安装完成后执行 `sudo openvpn-managerctl`，即可进入类似图片所示的中文数字菜单；
+菜单支持 OpenVPN、管理面板、客户端、日志、远程版本检查和在线更新等常用操作。
+也可以直接使用数字快捷命令，例如 `sudo openvpn-managerctl 1`；安装器同时提供兼容图片习惯的
+`sudo bt` 命令别名。 本机 CLI 与 Web
+控制台使用同一个权限隔离代理：
+
+```text
+============================================================================
+                         OpenVPN 管理中心命令行
+============================================================================
+(1) 重启管理面板                         (2) 停止管理面板
+(3) 启动管理面板                         (4) 重载管理面板
+(5) 重启 OpenVPN 服务                    (6) 停止 OpenVPN 服务
+(7) 启动 OpenVPN 服务                    (8) 应用配置并重启
+(9) 查看 OpenVPN 状态                    (10) 查看管理面板状态
+(11) 查看客户端列表                       (12) 新建客户端
+(13) 查看客户端配置                       (14) 设置客户端下级内网
+(15) 踢出当前客户端                       (16) 吊销并删除客户端
+(17) 查看服务端设置                       (18) 修改服务端设置
+(19) 查看 OpenVPN 日志                    (20) 查看客户端日志
+(21) 检查远程更新                         (22) 更新面板与 OpenVPN
+(23) 查看更新任务状态
+(0) 退出
+============================================================================
+```
+
+数字菜单中的“更新面板与 OpenVPN”会沿用现有的 VPN 端口和服务端参数，不会因升级
+重新随机端口。停止管理面板只停止本项目 Web 服务，不会停止 Nginx；“应用配置并重启”
+会重新生成受管配置并重启 OpenVPN，请勿在唯一的 VPN 管理通道上盲目执行。
+管理控制台端口属于安装级参数，命令行菜单只读显示；如需更换，请使用安装器的
+`--web-port` 参数并提前放行新端口。
 
 ```bash
+# 打开图片样式的交互菜单
+sudo openvpn-managerctl
+sudo openvpn-managerctl menu
+
+# 数字快捷命令：1 = 重启管理面板，5 = 重启 OpenVPN，21 = 检查远程更新
+sudo openvpn-managerctl 1
+sudo openvpn-managerctl 5
+sudo openvpn-managerctl 21
+
+# 非交互命令
 sudo openvpn-managerctl status
 sudo openvpn-managerctl list
 
@@ -244,6 +284,8 @@ sudo openvpn-managerctl profile branch-a
 sudo openvpn-managerctl revoke branch-a
 # 吊销并删除该客户端的生成文件；PKI 吊销记录仍保留
 sudo openvpn-managerctl logs 100
+sudo openvpn-managerctl edit-settings
+sudo openvpn-managerctl panel-status
 sudo openvpn-managerctl restart
 sudo openvpn-managerctl update
 sudo openvpn-managerctl update-status
