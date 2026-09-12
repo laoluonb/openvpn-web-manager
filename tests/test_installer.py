@@ -102,7 +102,10 @@ class InstallerRegressionTests(unittest.TestCase):
         agent_service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         tmpfiles = (ROOT / "config/openvpn-manager.tmpfiles").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.8"', installer)
+        self.assertIn('VERSION="1.2.9"', installer)
+        self.assertIn('CLI_COMMAND="/usr/local/bin/openvpn-manager"', installer)
+        self.assertIn("cleanup_legacy_cli_commands", installer)
+        self.assertNotIn("install_cli_alias", installer)
         self.assertIn('agent.py" --direct sync_runtime', installer)
         self.assertIn("openvpn-manager-update.service", installer)
         self.assertIn('"update_check_path": "/var/lib/openvpn-manager/update-check.json"', installer)
@@ -187,6 +190,18 @@ class InstallerRegressionTests(unittest.TestCase):
         uninstaller = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
         self.assertIn("/etc/tmpfiles.d/openvpn-manager.conf", uninstaller)
         self.assertIn("rm -rf /run/openvpn-manager", uninstaller)
+
+    def test_only_openvpn_manager_is_installed_as_public_cli(self) -> None:
+        installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+        uninstaller = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn('CLI_COMMAND="/usr/local/bin/openvpn-manager"', installer)
+        self.assertIn('scripts/openvpn-manager" "$CLI_COMMAND"', installer)
+        self.assertNotIn("install_cli_alias", installer)
+        self.assertNotIn("sudo openvpn-managerctl", readme)
+        self.assertNotIn("sudo bt", readme)
+        self.assertIn('LEGACY_CLI_COMMAND="/usr/local/bin/openvpn-managerctl"', uninstaller)
+        self.assertIn('LEGACY_CLI_ALIAS="/usr/local/bin/bt"', uninstaller)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_NAME="openvpn-web-manager"
-VERSION="1.2.8"
+VERSION="1.2.9"
 INSTALL_DIR="/opt/$APP_NAME"
 CONFIG_DIR="/etc/openvpn-manager"
 STATE_DIR="/var/lib/openvpn-manager"
@@ -13,8 +13,9 @@ EASYRSA_DIR="$OPENVPN_DIR/easy-rsa"
 CREDENTIAL_FILE="/root/openvpn-manager-credentials.txt"
 WEB_USER="openvpn-web"
 WEB_GROUP="openvpn-web"
-CLI_COMMAND="/usr/local/bin/openvpn-managerctl"
-CLI_ALIAS="/usr/local/bin/bt"
+CLI_COMMAND="/usr/local/bin/openvpn-manager"
+LEGACY_CLI_COMMAND="/usr/local/bin/openvpn-managerctl"
+LEGACY_CLI_ALIAS="/usr/local/bin/bt"
 VPN_SUBNET="10.8.0.0/24"
 VPN_PROTOCOL="udp"
 DNS_SERVERS="1.1.1.1,9.9.9.9"
@@ -322,7 +323,7 @@ remove_existing_openvpn_state() {
   fi
   rm -rf /etc/openvpn /var/lib/openvpn /var/log/openvpn
   if [[ "$MANAGED_EXISTING" == "1" || "$EXISTING_ACTION" == "remove" ]]; then
-    remove_cli_alias_if_owned
+    cleanup_legacy_cli_commands
     rm -rf "$CONFIG_DIR" "$STATE_DIR" "$LEGACY_CONFIG_DIR" "$LEGACY_STATE_DIR"
     if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
       rm -rf "$INSTALL_DIR"
@@ -342,24 +343,15 @@ remove_existing_openvpn_state() {
   systemctl daemon-reload
 }
 
-remove_cli_alias_if_owned() {
+cleanup_legacy_cli_commands() {
   local resolved=""
-  if [[ -L "$CLI_ALIAS" ]]; then
-    resolved="$(readlink -f "$CLI_ALIAS" 2>/dev/null || true)"
-    [[ "$resolved" == "$CLI_COMMAND" ]] && rm -f "$CLI_ALIAS"
-  fi
-}
-
-install_cli_alias() {
-  if [[ -e "$CLI_ALIAS" || -L "$CLI_ALIAS" ]]; then
-    if [[ -L "$CLI_ALIAS" && "$(readlink -f "$CLI_ALIAS" 2>/dev/null || true)" == "$CLI_COMMAND" ]]; then
-      return 0
+  if [[ -L "$LEGACY_CLI_ALIAS" ]]; then
+    resolved="$(readlink -f "$LEGACY_CLI_ALIAS" 2>/dev/null || true)"
+    if [[ "$resolved" == "$LEGACY_CLI_COMMAND" || "$resolved" == "$CLI_COMMAND" ]]; then
+      rm -f "$LEGACY_CLI_ALIAS"
     fi
-    warn "检测到已有 $CLI_ALIAS，未覆盖；请使用 $CLI_COMMAND，或手动确认后再建立 bt 别名。"
-    return 0
   fi
-  ln -s "$CLI_COMMAND" "$CLI_ALIAS"
-  log "已创建命令行别名：bt"
+  rm -f "$LEGACY_CLI_COMMAND"
 }
 
 if dpkg-query -W -f='${Status}' openvpn 2>/dev/null | grep -q 'install ok installed'; then
@@ -819,10 +811,10 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 
 log "正在安装系统服务和命令行工具"
+cleanup_legacy_cli_commands
 install -m 0755 "$SCRIPT_DIR/scripts/openvpn-manager-firewall" /usr/local/sbin/openvpn-manager-firewall
 install -m 0755 "$SCRIPT_DIR/scripts/openvpn-manager-update" /usr/local/sbin/openvpn-manager-update
-install -m 0755 "$SCRIPT_DIR/scripts/openvpn-managerctl" "$CLI_COMMAND"
-install_cli_alias
+install -m 0755 "$SCRIPT_DIR/scripts/openvpn-manager" "$CLI_COMMAND"
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-firewall.service" /etc/systemd/system/openvpn-manager-firewall.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-agent.service" /etc/systemd/system/openvpn-manager-agent.service
 install -m 0644 "$SCRIPT_DIR/config/openvpn-manager-update.service" /etc/systemd/system/openvpn-manager-update.service
@@ -869,7 +861,7 @@ chmod 0640 "$CONFIG_DIR/install-state.json"
 printf '\n\033[1;32m安装完成。\033[0m\n'
 printf '  管理地址：       https://%s:%s\n' "$ENDPOINT" "$WEB_PORT"
 printf '  OpenVPN：       %s:%s/%s\n' "$ENDPOINT" "$VPN_PORT" "$VPN_PROTOCOL"
-printf '  命令行管理：     sudo openvpn-managerctl（或 sudo bt）\n'
+printf '  命令行管理：     sudo openvpn-manager\n'
 printf '  首个客户端：     %s/clients/%s.ovpn\n' "$STATE_DIR" "$INITIAL_CLIENT"
 if [[ "$WEB_CONFIG_EXISTS" == "0" ]]; then
   printf '  用户名：         %s\n' "$ADMIN_USER"
@@ -888,3 +880,5 @@ fi
 if [[ -z "$TLS_CERT" ]]; then
   warn "已安装自签名 TLS 证书，生产环境请替换为受信任证书。"
 fi
+
+\n

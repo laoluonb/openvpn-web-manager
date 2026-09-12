@@ -8,8 +8,9 @@ LEGACY_CONFIG_DIR="/etc/openvpn-web-manager"
 LEGACY_STATE_DIR="/var/lib/openvpn-web-manager"
 PURGE="0"
 ASSUME_YES="0"
-CLI_COMMAND="/usr/local/bin/openvpn-managerctl"
-CLI_ALIAS="/usr/local/bin/bt"
+CLI_COMMAND="/usr/local/bin/openvpn-manager"
+LEGACY_CLI_COMMAND="/usr/local/bin/openvpn-managerctl"
+LEGACY_CLI_ALIAS="/usr/local/bin/bt"
 
 usage() {
   cat <<'EOF'
@@ -55,9 +56,13 @@ systemctl disable --now openvpn-server@server.service 2>/dev/null || true
 systemctl disable --now openvpn-manager-firewall.service 2>/dev/null || true
 /usr/local/sbin/openvpn-manager-firewall stop 2>/dev/null || true
 
-if [[ -L "$CLI_ALIAS" && "$(readlink -f "$CLI_ALIAS" 2>/dev/null || true)" == "$CLI_COMMAND" ]]; then
-  rm -f "$CLI_ALIAS"
+if [[ -L "$LEGACY_CLI_ALIAS" ]]; then
+  resolved_alias="$(readlink -f "$LEGACY_CLI_ALIAS" 2>/dev/null || true)"
+  if [[ "$resolved_alias" == "$CLI_COMMAND" || "$resolved_alias" == "$LEGACY_CLI_COMMAND" ]]; then
+    rm -f "$LEGACY_CLI_ALIAS"
+  fi
 fi
+rm -f "$CLI_COMMAND" "$LEGACY_CLI_COMMAND"
 
 rm -f /etc/nginx/sites-enabled/openvpn-web-manager /etc/nginx/sites-available/openvpn-web-manager
 if nginx -t >/dev/null 2>&1; then
@@ -72,7 +77,6 @@ rm -f \
   /etc/systemd/system/openvpn-server@server.service.d/openvpn-manager.conf \
   /usr/local/sbin/openvpn-manager-firewall \
   /usr/local/sbin/openvpn-manager-update \
-  "$CLI_COMMAND" \
   /etc/sysctl.d/99-openvpn-manager.conf \
   /etc/tmpfiles.d/openvpn-manager.conf
 rm -rf /run/openvpn-manager

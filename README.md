@@ -222,10 +222,9 @@ journalctl -u openvpn-manager-update.service -n 200 --no-pager
 
 ## 命令行管理
 
-安装完成后执行 `sudo openvpn-managerctl`，即可进入类似图片所示的中文数字菜单；
+安装完成后执行 `sudo openvpn-manager`，即可进入类似图片所示的中文数字菜单；
 菜单支持 OpenVPN、管理面板、客户端、日志、远程版本检查和在线更新等常用操作。
-也可以直接使用数字快捷命令，例如 `sudo openvpn-managerctl 1`；安装器同时提供兼容图片习惯的
-`sudo bt` 命令别名。 本机 CLI 与 Web
+也可以直接使用数字快捷命令，例如 `sudo openvpn-manager 1`。本机 CLI 与 Web
 控制台使用同一个权限隔离代理：
 
 ```text
@@ -256,39 +255,39 @@ journalctl -u openvpn-manager-update.service -n 200 --no-pager
 
 ```bash
 # 打开图片样式的交互菜单
-sudo openvpn-managerctl
-sudo openvpn-managerctl menu
+sudo openvpn-manager
+sudo openvpn-manager menu
 
 # 数字快捷命令：1 = 重启管理面板，5 = 重启 OpenVPN，21 = 检查远程更新
-sudo openvpn-managerctl 1
-sudo openvpn-managerctl 5
-sudo openvpn-managerctl 21
+sudo openvpn-manager 1
+sudo openvpn-manager 5
+sudo openvpn-manager 21
 
 # 非交互命令
-sudo openvpn-managerctl status
-sudo openvpn-managerctl list
+sudo openvpn-manager status
+sudo openvpn-manager list
 
 # 普通客户端
-sudo openvpn-managerctl create alice-phone
+sudo openvpn-manager create alice-phone
 
 # 分支客户端：仅服务端可访问其 LAN
-sudo openvpn-managerctl create branch-a --lan-subnet 192.168.50.0/24
+sudo openvpn-manager create branch-a --lan-subnet 192.168.50.0/24
 
-sudo openvpn-managerctl network branch-a 192.168.50.0/24 --share-lan
+sudo openvpn-manager network branch-a 192.168.50.0/24 --share-lan
 
 # 移除下级内网设置
-sudo openvpn-managerctl network branch-a ""
+sudo openvpn-manager network branch-a ""
 
-sudo openvpn-managerctl disconnect branch-a
-sudo openvpn-managerctl profile branch-a
-sudo openvpn-managerctl revoke branch-a
+sudo openvpn-manager disconnect branch-a
+sudo openvpn-manager profile branch-a
+sudo openvpn-manager revoke branch-a
 # 吊销并删除该客户端的生成文件；PKI 吊销记录仍保留
-sudo openvpn-managerctl logs 100
-sudo openvpn-managerctl edit-settings
-sudo openvpn-managerctl panel-status
-sudo openvpn-managerctl restart
-sudo openvpn-managerctl update
-sudo openvpn-managerctl update-status
+sudo openvpn-manager logs 100
+sudo openvpn-manager edit-settings
+sudo openvpn-manager panel-status
+sudo openvpn-manager restart
+sudo openvpn-manager update
+sudo openvpn-manager update-status
 ```
 
 `profile` 输出包含私钥，请勿将结果写入不受保护的日志。生成的客户端文件位于

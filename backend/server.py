@@ -204,22 +204,22 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.8-demo",
+            "manager_version": "1.2.9-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.update_check = {
-            "current_manager_version": "1.2.8-demo",
-            "latest_manager_version": "v1.2.8-demo",
+            "current_manager_version": "1.2.9-demo",
+            "latest_manager_version": "v1.2.9-demo",
             "current_openvpn_version": "2.6 demo",
             "installed_openvpn_version": "2.6 demo",
             "candidate_openvpn_version": "2.6 demo",
             "manager_update_available": False,
             "openvpn_update_available": False,
             "update_available": False,
-            "release_name": "v1.2.8：图片风格命令行菜单",
-            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.8",
+            "release_name": "v1.2.9：统一 openvpn-manager 命令",
+            "release_url": "https://github.com/laoluonb/openvpn-web-manager/releases/tag/v1.2.9",
             "release_published_at": "2026-09-12T00:00:00Z",
-            "release_notes": "新增图片风格的中文数字命令行管理菜单。\n新增管理面板、OpenVPN、客户端、日志和在线更新快捷操作，并继续保留 VPN 端口和服务端参数。",
+            "release_notes": "统一使用 sudo openvpn-manager 进入中文数字命令行管理菜单。\n升级时清理旧命令入口，在线更新继续保留 VPN 端口和服务端参数。",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         self.clients = [
@@ -279,7 +279,7 @@ class DemoAgent:
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
             **self.settings,
-            "manager_version": "1.2.8-demo",
+            "manager_version": "1.2.9-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -454,9 +454,9 @@ DEMO-TLS-CRYPT
                 self.update_state = {
                     "state": "completed",
                     "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
-                    "manager_version": "1.2.8-demo",
+                    "manager_version": "1.2.9-demo",
                     "openvpn_version": "OpenVPN 2.6 demo",
-                    "target_version": "v1.2.8-demo",
+                    "target_version": "v1.2.9-demo",
                 }
                 return dict(self.update_state)
             raise APIError("不支持此演示操作")
@@ -502,7 +502,7 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "OpenVPNWebManager/1.2.8"
+    server_version = "OpenVPNWebManager/1.2.9"
     context: AppContext
 
     def log_message(self, fmt: str, *args: Any) -> None:
