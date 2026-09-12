@@ -1185,12 +1185,18 @@ def serve(controller: OpenVPNController, socket_path: str) -> None:
         raise AgentError("当前平台不支持 Unix 域套接字")
     socket_file = pathlib.Path(socket_path)
     socket_file.parent.mkdir(parents=True, exist_ok=True)
+    group_id = group_gid(controller.web_group)
+    # The OpenVPN unit and older installations can leave this shared runtime
+    # directory owned by root:root.  Repair it before binding agent.sock so
+    # the openvpn-web user can traverse the directory and connect to the
+    # root-owned, group-readable control socket.
+    os.chown(socket_file.parent, 0, group_id)
+    os.chmod(socket_file.parent, 0o750)
     try:
         socket_file.unlink()
     except FileNotFoundError:
         pass
     allowed_uid = user_uid(controller.web_group)
-    group_id = group_gid(controller.web_group)
     AgentRequestHandler.controller = controller
     AgentRequestHandler.allowed_uid = allowed_uid
     with ThreadedUnixServer(socket_path, AgentRequestHandler) as server:

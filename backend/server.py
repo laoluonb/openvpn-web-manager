@@ -191,7 +191,7 @@ class DemoAgent:
         self.update_state = {
             "state": "idle",
             "message": "演示环境尚未执行在线更新",
-            "manager_version": "1.2.1-demo",
+            "manager_version": "1.2.2-demo",
             "openvpn_version": "OpenVPN 2.6 demo",
         }
         self.clients = [
@@ -251,7 +251,7 @@ class DemoAgent:
             "online_count": len(online),
             "online_clients": [item["connection"] for item in online],
             **self.settings,
-            "manager_version": "1.2.1-demo",
+            "manager_version": "1.2.2-demo",
             "version": "OpenVPN 2.6 demo",
             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         }
@@ -386,9 +386,9 @@ DEMO-TLS-CRYPT
                 self.update_state = {
                     "state": "completed",
                     "message": "演示环境已模拟完成管理面板与 OpenVPN 更新",
-                    "manager_version": "1.2.1-demo",
+                    "manager_version": "1.2.2-demo",
                     "openvpn_version": "OpenVPN 2.6 demo",
-                    "target_version": "v1.2.1-demo",
+                    "target_version": "v1.2.2-demo",
                 }
                 return dict(self.update_state)
             raise APIError("不支持此演示操作")

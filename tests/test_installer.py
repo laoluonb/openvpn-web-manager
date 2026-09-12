@@ -100,7 +100,7 @@ class InstallerRegressionTests(unittest.TestCase):
         installer = (ROOT / "install.sh").read_text(encoding="utf-8")
         override = (ROOT / "config/openvpn-service-override.conf").read_text(encoding="utf-8")
         updater = (ROOT / "scripts/openvpn-manager-update").read_text(encoding="utf-8")
-        self.assertIn('VERSION="1.2.1"', installer)
+        self.assertIn('VERSION="1.2.2"', installer)
         self.assertIn('agent.py" --direct sync_runtime', installer)
         self.assertIn("openvpn-manager-update.service", installer)
         self.assertIn("RuntimeDirectory=openvpn-manager", override)
@@ -168,6 +168,11 @@ class InstallerRegressionTests(unittest.TestCase):
         service = (ROOT / "config/openvpn-manager-agent.service").read_text(encoding="utf-8")
         self.assertIn("Wants=network-online.target openvpn-server@server.service", service)
         self.assertNotIn("Requires=openvpn-server@server.service", service)
+
+    def test_agent_repairs_shared_runtime_directory_permissions(self) -> None:
+        agent = (ROOT / "backend/agent.py").read_text(encoding="utf-8")
+        self.assertIn("os.chown(socket_file.parent, 0, group_id)", agent)
+        self.assertIn("os.chmod(socket_file.parent, 0o750)", agent)
 
 
 if __name__ == "__main__":
