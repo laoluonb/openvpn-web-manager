@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 APP_NAME="openvpn-web-manager"
 VERSION="1.2.9"
 INSTALL_DIR="/opt/$APP_NAME"

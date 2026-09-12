@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 CONFIG_FILE="/etc/openvpn-manager/server.json"
 REQUEST_FILE="/var/lib/openvpn-manager/update-request.json"
 STATUS_FILE="/var/lib/openvpn-manager/update-status.json"
@@ -8,6 +10,7 @@ LOCK_FILE="/run/openvpn-manager/update.lock"
 REPOSITORY="laoluonb/openvpn-web-manager"
 WORK_DIR=""
 UPDATE_FINISHED="0"
+FAILURE_DETAIL=""
 
 write_status() {
   local state="$1"
@@ -51,8 +54,12 @@ cleanup() {
 on_error() {
   local exit_code="$1"
   local line_number="$2"
+  local message="更新失败（脚本第 ${line_number} 行，状态码 ${exit_code}）。请查看 journalctl -u openvpn-manager-update。"
+  if [[ -n "$FAILURE_DETAIL" ]]; then
+    message="更新失败（安装脚本退出码 ${exit_code}）。${FAILURE_DETAIL}"
+  fi
   if [[ "$UPDATE_FINISHED" != "1" ]]; then
-    write_status "failed" "更新失败（脚本第 ${line_number} 行，状态码 ${exit_code}）。请查看 journalctl -u openvpn-manager-update。"
+    write_status "failed" "$message"
   fi
   exit "$exit_code"
 }
@@ -188,7 +195,9 @@ PY
 )
 
 write_status "running" "正在备份配置、升级 OpenVPN 并安装管理面板 $TARGET_VERSION。" "$TARGET_VERSION"
-bash "$SOURCE_DIR/install.sh" \
+INSTALL_LOG="$WORK_DIR/install.log"
+set +e
+/bin/bash "$SOURCE_DIR/install.sh" \
   --existing-action preserve \
   --endpoint "${SETTINGS[0]}" \
   --vpn-port "${SETTINGS[1]}" \
@@ -206,7 +215,13 @@ bash "$SOURCE_DIR/install.sh" \
   --data-cipher "${SETTINGS[13]}" \
   --auth-digest "${SETTINGS[14]}" \
   --log-verb "${SETTINGS[15]}" \
-  --push-routes "${SETTINGS[16]}"
+  --push-routes "${SETTINGS[16]}" >"$INSTALL_LOG" 2>&1
+INSTALL_EXIT_CODE=$?
+set -e
+if ((INSTALL_EXIT_CODE != 0)); then
+  FAILURE_DETAIL="$(tail -n 8 "$INSTALL_LOG" 2>/dev/null | sed '/^[[:space:]]*$/d' | tr '\n' ' ' | cut -c1-900)"
+  exit "$INSTALL_EXIT_CODE"
+fi
 
 UPDATE_FINISHED="1"
 write_status "completed" "管理面板与 OpenVPN 已更新完成，现有 VPN 端口和服务端参数保持不变。" "$TARGET_VERSION"
